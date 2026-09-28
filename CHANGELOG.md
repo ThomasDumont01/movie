@@ -9,7 +9,9 @@
 - conversion ISO vers M4V intégrée à la pipeline vérifiée ;
 - écriture atomique des métadonnées étendue au M4V ;
 - estimation du temps restant fondée sur la vitesse récente ;
-- chemins glissés depuis Finder acceptés avec leurs espaces échappés.
+- chemins glissés depuis Finder acceptés avec leurs espaces échappés ;
+- nommage automatique des médias renseignés pour Infuse et les autres lecteurs,
+  avec identifiant TMDB exact lorsqu'il est disponible.
 
 ## 0.1.0 — 2026-09-28
 

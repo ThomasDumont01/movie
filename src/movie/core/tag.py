@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import tempfile
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from movie.core.models import (
     MovieError,
     MovieMetadata,
+    OutputExistsError,
     ProbedMedia,
     ProgressUpdate,
     TagPlan,
@@ -24,9 +27,18 @@ from movie.core.verification import (
     validate_preserved_media,
     validate_source,
 )
-from movie.core.workflow import phase_callback, report_stage
+from movie.core.workflow import (
+    is_occupied,
+    phase_callback,
+    prepare_destination,
+    publish_without_overwrite,
+    report_stage,
+)
 
 _SUPPORTED_SUFFIXES = {".mkv", ".mp4", ".m4v"}
+_MAX_FILENAME_BYTES = 240
+_UNSAFE_FILENAME_CHARACTERS = re.compile(r'["\\/:|<>*?]+')
+_TMDB_MOVIE_PATH = re.compile(r"/movie/(\d+)(?:-[^/?#]+)?/?")
 
 
 class _ProbeBackend(Protocol):
@@ -45,7 +57,12 @@ class _TaggerBackend(Protocol):
     ) -> Path: ...
 
 
-def build_tag_plan(source: Path | str, metadata: MovieMetadata) -> TagPlan:
+def build_tag_plan(
+    source: Path | str,
+    metadata: MovieMetadata,
+    *,
+    rename_for_media_center: bool = False,
+) -> TagPlan:
     """Valide le média et les informations sans modifier le fichier."""
 
     unresolved = Path(source).expanduser()
@@ -78,7 +95,17 @@ def build_tag_plan(source: Path | str, metadata: MovieMetadata) -> TagPlan:
             else None
         ),
     )
-    return TagPlan(source=source_path, metadata=normalized)
+    output = (
+        _media_center_path(source_path, normalized)
+        if rename_for_media_center
+        else source_path
+    )
+    if output != source_path and is_occupied(output):
+        raise OutputExistsError(
+            "Le nom recommandé pour les lecteurs multimédias existe déjà : "
+            f"{output}"
+        )
+    return TagPlan(source=source_path, output=output, metadata=normalized)
 
 
 class TagService:
@@ -97,6 +124,8 @@ class TagService:
         source_media = self.probe.probe(plan.source)
         validate_source(source_media)
         _ensure_free_space(plan.source)
+        if plan.output != plan.source:
+            prepare_destination(plan.output)
 
         source_mode = stat.S_IMODE(plan.source.stat().st_mode)
         with tempfile.TemporaryDirectory(
@@ -138,11 +167,11 @@ class TagService:
             )
             try:
                 staged_file.chmod(source_mode)
-                os.replace(staged_file, plan.source)
             except OSError as error:
                 raise MovieError(
-                    "Impossible de remplacer le fichier d'origine en toute sécurité."
+                    "Impossible de préserver les permissions du fichier d'origine."
                 ) from error
+            _publish_tagged_file(staged_file, plan.source, plan.output)
             report_stage(
                 on_progress,
                 "Publication des métadonnées",
@@ -151,8 +180,8 @@ class TagService:
             )
 
         return TagResult(
-            output=plan.source,
-            media=replace(output_media, path=plan.source),
+            output=plan.output,
+            media=replace(output_media, path=plan.output),
             warnings=(),
         )
 
@@ -163,3 +192,69 @@ def _ensure_free_space(source: Path) -> None:
         tag_required_bytes(source),
         operation="modifier ce fichier sans risque",
     )
+
+
+def _media_center_path(source: Path, metadata: MovieMetadata) -> Path:
+    """Construit un nom reconnu par Infuse et les serveurs multimédias."""
+
+    title = _safe_filename_component(metadata.title)
+    year = f" ({metadata.year})" if metadata.year else ""
+    tmdb_id = _tmdb_movie_id(metadata.source_url)
+    identifier = f" {{tmdb-{tmdb_id}}}" if tmdb_id else ""
+    suffix = source.suffix
+    filename = _bounded_filename(title, f"{year}{identifier}", suffix)
+    return source.with_name(filename)
+
+
+def _safe_filename_component(value: str) -> str:
+    cleaned = _UNSAFE_FILENAME_CHARACTERS.sub(" ", value)
+    cleaned = " ".join(cleaned.split()).strip(" .")
+    return cleaned or "media"
+
+
+def _bounded_filename(title: str, metadata_suffix: str, extension: str) -> str:
+    reserved = f"{metadata_suffix}{extension}"
+    available = _MAX_FILENAME_BYTES - len(reserved.encode("utf-8"))
+    encoded = title.encode("utf-8")
+    if len(encoded) > available:
+        title = encoded[:available].decode("utf-8", errors="ignore").rstrip(" .")
+    return f"{title or 'media'}{reserved}"
+
+
+def _tmdb_movie_id(source_url: str | None) -> str | None:
+    if not source_url:
+        return None
+    parsed = urlsplit(source_url)
+    if parsed.scheme != "https" or parsed.hostname not in {
+        "themoviedb.org",
+        "www.themoviedb.org",
+    }:
+        return None
+    match = _TMDB_MOVIE_PATH.fullmatch(parsed.path)
+    return match.group(1) if match else None
+
+
+def _publish_tagged_file(staged_file: Path, source: Path, output: Path) -> None:
+    if output == source:
+        try:
+            os.replace(staged_file, source)
+        except OSError as error:
+            raise MovieError(
+                "Impossible de remplacer le fichier d'origine en toute sécurité."
+            ) from error
+        return
+
+    publish_without_overwrite(staged_file, output)
+    try:
+        source.unlink()
+    except OSError as error:
+        try:
+            output.unlink()
+        except OSError as rollback_error:
+            raise MovieError(
+                "Le nouveau fichier a été publié, mais l'ancien nom n'a pas pu être "
+                f"retiré. Vérifie manuellement ces deux chemins : {source} et {output}."
+            ) from rollback_error
+        raise MovieError(
+            "Le fichier n'a pas pu être renommé ; l'original a été conservé."
+        ) from error

@@ -68,6 +68,7 @@ class MediaTaggerTests(TestCase):
             command = run.call_args.args[0]
             self.assertIn("copy", command)
             self.assertIn("title=Mon Film", command)
+            self.assertIn("synopsis=Résumé", command)
             self.assertNotIn("-attach", command)
 
     @patch("movie.ffmpeg.subprocess.run")

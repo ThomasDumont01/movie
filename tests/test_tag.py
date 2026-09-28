@@ -12,10 +12,11 @@ from movie.core.models import (
     MediaStream,
     MovieError,
     MovieMetadata,
+    OutputExistsError,
     ProbedMedia,
     ProgressUpdate,
 )
-from movie.core.tag import TagService, build_tag_plan
+from movie.core.tag import TagService, _publish_tagged_file, build_tag_plan
 
 
 class TagPlanTests(TestCase):
@@ -32,6 +33,91 @@ class TagPlanTests(TestCase):
                     )
                     self.assertEqual(plan.metadata.title, "Mon Film")
                     self.assertEqual(plan.metadata.genres, ("Drame",))
+                    self.assertEqual(plan.output, source.resolve())
+
+    def test_media_center_name_contains_title_year_and_exact_tmdb_id(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "A1_t00.mkv"
+            source.write_bytes(b"source")
+
+            plan = build_tag_plan(
+                source,
+                MovieMetadata(
+                    title="Star Wars : L'Ascension de Skywalker",
+                    year=2019,
+                    source_url=(
+                        "https://www.themoviedb.org/movie/"
+                        "181812-star-wars-the-rise-of-skywalker"
+                    ),
+                ),
+                rename_for_media_center=True,
+            )
+
+            self.assertEqual(
+                plan.output.name,
+                "Star Wars L'Ascension de Skywalker (2019) {tmdb-181812}.mkv",
+            )
+
+    def test_manual_metadata_uses_safe_readable_filename(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.m4v"
+            source.write_bytes(b"source")
+
+            plan = build_tag_plan(
+                source,
+                MovieMetadata(title='Voyage : "Bretagne" / été', year=2024),
+                rename_for_media_center=True,
+            )
+
+            self.assertEqual(plan.output.name, "Voyage Bretagne été (2024).m4v")
+
+    def test_existing_media_center_destination_is_refused(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "film.mkv"
+            source.write_bytes(b"source")
+            (directory / "Mon Film (2024).mkv").write_bytes(b"existing")
+
+            with self.assertRaisesRegex(OutputExistsError, "existe déjà"):
+                build_tag_plan(
+                    source,
+                    MovieMetadata(title="Mon Film", year=2024),
+                    rename_for_media_center=True,
+                )
+
+    def test_long_title_keeps_tmdb_identifier_within_filename_limit(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"source")
+
+            plan = build_tag_plan(
+                source,
+                MovieMetadata(
+                    title="É" * 300,
+                    year=2024,
+                    source_url="https://www.themoviedb.org/movie/123-film",
+                ),
+                rename_for_media_center=True,
+            )
+
+            self.assertLessEqual(len(plan.output.name.encode("utf-8")), 240)
+            self.assertTrue(plan.output.name.endswith(" (2024) {tmdb-123}.mkv"))
+
+    def test_untrusted_source_url_is_not_used_in_filename(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"source")
+
+            plan = build_tag_plan(
+                source,
+                MovieMetadata(
+                    title="Mon Film",
+                    source_url="https://example.com/movie/123-film",
+                ),
+                rename_for_media_center=True,
+            )
+
+            self.assertEqual(plan.output.name, "Mon Film.mkv")
 
     def test_unsupported_file_symlink_and_empty_title_are_refused(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -77,6 +163,65 @@ class TagExecutionTests(TestCase):
             self.assertEqual(totals, sorted(totals))
             self.assertEqual(totals[-1], 1.0)
             self.assertEqual(list(source.parent.glob(".movie-tag-*")), [])
+
+    def test_verified_result_is_safely_published_under_media_center_name(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "A1_t00.mkv"
+            source.write_bytes(b"original")
+            metadata = _metadata()
+            plan = build_tag_plan(
+                source,
+                metadata,
+                rename_for_media_center=True,
+            )
+
+            result = TagService(_TagProbe(metadata), _FakeTagger()).execute(plan)
+
+            self.assertFalse(source.exists())
+            self.assertEqual(result.output, plan.output)
+            self.assertEqual(plan.output.read_bytes(), b"tagged")
+            self.assertEqual(result.media.path, plan.output)
+
+    @patch("movie.core.tag.os.replace", side_effect=PermissionError)
+    def test_in_place_publication_failure_preserves_original(
+        self, _replace: MagicMock
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"original")
+            plan = build_tag_plan(source, _metadata())
+
+            with self.assertRaisesRegex(MovieError, "remplacer le fichier"):
+                TagService(_TagProbe(_metadata()), _FakeTagger()).execute(plan)
+
+            self.assertEqual(source.read_bytes(), b"original")
+
+    def test_failed_source_removal_rolls_back_renamed_output(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            staged = directory / "staged.mkv"
+            source = directory / "source.mkv"
+            output = directory / "output.mkv"
+            staged.write_bytes(b"tagged")
+            source.write_bytes(b"original")
+            original_unlink = Path.unlink
+            calls = 0
+
+            def fail_once(path: Path, *, missing_ok: bool = False) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise PermissionError
+                original_unlink(path, missing_ok=missing_ok)
+
+            with (
+                patch.object(Path, "unlink", autospec=True, side_effect=fail_once),
+                self.assertRaisesRegex(MovieError, "original a été conservé"),
+            ):
+                _publish_tagged_file(staged, source, output)
+
+            self.assertTrue(source.is_file())
+            self.assertFalse(output.exists())
 
     def test_tagger_or_verification_failure_preserves_original(self) -> None:
         with TemporaryDirectory() as temporary_directory:

@@ -71,7 +71,7 @@ def metadata_arguments(metadata: MovieMetadata) -> tuple[str, ...]:
         "-metadata",
         f"description={(metadata.summary or '')[:4000]}",
         "-metadata",
-        "synopsis=",
+        f"synopsis={(metadata.summary or '')[:4000]}",
         "-metadata",
         f"genre={', '.join(metadata.genres)}",
         "-metadata",

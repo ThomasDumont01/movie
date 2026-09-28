@@ -151,6 +151,7 @@ class TagPlan:
     """Enrichissement sûr d'un média existant, sans réencodage."""
 
     source: Path
+    output: Path
     metadata: MovieMetadata
 
 

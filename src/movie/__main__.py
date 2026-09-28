@@ -594,10 +594,12 @@ def _tag() -> int:
     else:
         metadata = _manual_metadata(source)
 
-    plan = build_tag_plan(source, metadata)
+    plan = build_tag_plan(source, metadata, rename_for_media_center=True)
     _print_subheading("Récapitulatif")
     year = f" ({plan.metadata.year})" if plan.metadata.year else ""
     print(f"  Fichier      : {plan.source}")
+    if plan.output != plan.source:
+        print(f"  Nouveau nom  : {plan.output.name}")
     print(f"  Titre        : {plan.metadata.title}{year}")
     print(f"  Informations : {'TMDB' if plan.metadata.source_url else 'saisie manuelle'}")
     print(f"  Jaquette     : {'oui' if plan.metadata.has_artwork else 'non'}")
@@ -626,6 +628,13 @@ def _tag() -> int:
     print("\n✓ Métadonnées écrites et vérifiées")
     print(f"  Fichier : {result.output}")
     print(f"  Titre   : {plan.metadata.title}{year}")
+    if plan.metadata.source_url:
+        print("  Lecteurs : nom compatible avec l'identification TMDB d'Infuse")
+    else:
+        print(
+            "  Infuse   : choisir « Aucun — utiliser les métadonnées intégrées » "
+            "si nécessaire"
+        )
     for warning in result.warnings:
         print(f"  ⚠ {warning}")
     return 0
