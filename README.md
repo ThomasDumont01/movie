@@ -21,6 +21,11 @@ Movie pose ensuite uniquement les questions nécessaires. Les commandes
 opérationnelles `scan`, `rip`, `convert` et `tag` n'acceptent volontairement pas
 d'options comme `--profile`, `--title` ou `--metadata-url`.
 
+> **Compatibilité des disques :** la version 0.2.0 prend en charge la
+> numérisation des **DVD uniquement**. Les Blu-ray et Blu-ray UHD ne sont pas
+> acceptés par `rip`, même si MakeMKV et le lecteur savent les ouvrir. Leur
+> prise en charge n'a pas encore été développée ni validée sur un support réel.
+
 Pour choisir sans réfléchir :
 
 - un DVD à archiver fidèlement : `uv run movie rip` ;
@@ -37,7 +42,9 @@ Movie nécessite :
 
 - macOS et Python 3.12 ou plus récent ;
 - [uv](https://docs.astral.sh/uv/) ;
-- [MakeMKV](https://www.makemkv.com/download/) pour les DVD et les ISO ;
+- [MakeMKV](https://www.makemkv.com/download/) pour les DVD et les images ISO ;
+- un lecteur compatible avec le support utilisé — un lecteur DVD ne peut pas
+  lire un Blu-ray ;
 - FFmpeg et ffprobe : `brew install ffmpeg`.
 
 Installation du projet :
@@ -110,6 +117,13 @@ Movie :
 est le MKV source produit par MakeMKV. Movie ne choisit jamais arbitrairement
 entre plusieurs éditions ou angles indiscernables.
 
+Cette commande refuse actuellement les Blu-ray et Blu-ray UHD. `scan` peut
+éventuellement afficher les informations que MakeMKV détecte sur un tel disque,
+mais cela ne constitue pas une prise en charge : la création du plan de
+numérisation sera bloquée avant toute écriture. Les ISO issues d'un Blu-ray ne
+sont pas davantage garanties par `convert`, même si certaines peuvent être
+ouvertes techniquement par MakeMKV.
+
 La vérification bloque uniquement un résultat manifestement inutilisable ou
 tronqué : fichier illisible, vidéo absente, audio totalement absent alors que
 le DVD en annonce, durée nulle ou écart supérieur à 5 % et à 3 secondes. Les
@@ -179,7 +193,16 @@ https://www.themoviedb.org/movie/181812-star-wars-the-rise-of-skywalker
 
 Movie affiche le titre, l'année, les genres et le résumé avant confirmation. Il
 intègre ensuite le titre, l'année, le résumé, les genres, le lien TMDB et la
-jaquette. Aucune clé API et aucun compte ne sont nécessaires.
+jaquette. Il renomme aussi le média avec le titre, l'année et l'identifiant TMDB
+exact, par exemple :
+
+```text
+Star Wars L'Ascension de Skywalker (2019) {tmdb-181812}.mkv
+```
+
+Ce nom suit la convention documentée par Infuse et lui permet de retrouver sans
+ambiguïté sa propre fiche et sa propre jaquette en ligne. Aucune clé API et aucun
+compte ne sont nécessaires.
 
 ### Film personnel
 
@@ -191,17 +214,23 @@ Choisis `manuel`, puis renseigne :
 - les genres, facultatifs ;
 - une jaquette locale JPEG, PNG ou WebP, facultative.
 
-Le nom du fichier n'est pas modifié. Les champs laissés vides effacent les
-anciennes valeurs correspondantes, ce qui permet aussi de retirer une ancienne
-identification TMDB.
+Le fichier reçoit un nom lisible construit à partir du titre et de l'année. Les
+champs laissés vides effacent les anciennes valeurs correspondantes, ce qui
+permet aussi de retirer une ancienne identification TMDB.
+
+Pour un film personnel, Infuse doit être configuré pour utiliser les données
+intégrées : clic droit sur le média, `Modifier les métadonnées`, puis
+`Aucun — utiliser les métadonnées intégrées`. Ce réglage peut aussi être activé
+pour un dossier entier. Movie rappelle cette information après le traitement.
 
 ### Sécurité de `tag`
 
 La vidéo et l'audio ne sont jamais réencodés. Movie écrit une copie temporaire
-sur le même volume, vérifie toutes les pistes et toutes les métadonnées, puis
-remplace atomiquement le fichier original. En cas d'erreur ou d'interruption,
-l'original reste intact. Une nouvelle jaquette remplace l'ancienne sans
-supprimer les autres pièces jointes utiles du MKV.
+sur le même volume, vérifie toutes les pistes et toutes les métadonnées, publie
+le nom compatible sans écraser un fichier existant, puis retire l'ancien nom.
+En cas d'erreur ou d'interruption, l'original reste intact. Une nouvelle
+jaquette remplace l'ancienne sans supprimer les autres pièces jointes utiles du
+MKV.
 
 ## Configuration
 
@@ -291,7 +320,7 @@ uv run pyright
 
 État vérifié le 28 septembre 2026 pour la version 0.2.0 :
 
-- 143 tests et 13 sous-tests réussissent ;
+- 151 tests et 13 sous-tests réussissent ;
 - la couverture automatisée atteint 85 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;
@@ -314,7 +343,7 @@ uv run pyright
 | Limite | Ce que cela signifie concrètement | Choix conseillé |
 | --- | --- | --- |
 | MakeMKV reste nécessaire | Movie pilote MakeMKV ; il ne réimplémente ni la lecture optique ni le déchiffrement. Si MakeMKV refuse un disque, Movie ne peut pas le forcer. | Vérifier d'abord le disque dans MakeMKV et relancer `doctor`. |
-| `rip` accepte les DVD | Le parcours de numérisation physique n'est pas encore qualifié pour Blu-ray ou UHD. | Utiliser un DVD, ou convertir ensuite une ISO que MakeMKV sait ouvrir. |
+| Blu-ray et UHD non pris en charge | `rip` les refuse explicitement. `scan` peut parfois les reconnaître et `convert` peut parfois ouvrir leur ISO, mais ces parcours ne sont ni développés ni testés comme compatibles. | Utiliser Movie uniquement avec des DVD pour la version 0.2.0. |
 | Un titre est extrait à la fois | Un disque de série avec plusieurs épisodes demande une exécution par épisode. | Relancer `rip` ou `convert` pour chaque titre voulu. |
 | Les menus ne sont pas conservés | Le MKV, MP4 ou M4V contient le film et ses pistes, pas l'interface interactive du DVD. | Conserver une image complète du disque si les menus sont indispensables. |
 | Les sous-titres DVD sont des images | Ils restent dans le MKV, mais ne sont pas transformés en texte et ne sont pas intégrés au MP4/M4V. | Choisir MKV pour conserver tous les sous-titres. |
