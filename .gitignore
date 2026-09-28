@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+build/
+dist/
+
+# macOS
+.DS_Store
+
+# Répertoires de travail transitoires de Movie
+.movie-staging-*/
+.movie-convert-*/
+note.txt
