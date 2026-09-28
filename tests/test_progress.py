@@ -7,10 +7,17 @@ from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from movie.core.models import ProgressUpdate
-from movie.terminal import _progress_bar, _ProgressRenderer
+from movie.terminal import _format_eta, _progress_bar, _ProgressRenderer
 
 
 class ProgressRendererTests(unittest.TestCase):
+    def test_eta_format_handles_hour_boundaries(self) -> None:
+        self.assertEqual(_format_eta(59), "59 s")
+        self.assertEqual(_format_eta(60), "1 min")
+        self.assertEqual(_format_eta(3_600), "1 h")
+        self.assertEqual(_format_eta(7_199), "2 h")
+        self.assertEqual(_format_eta(7_260), "2 h 01 min")
+
     def test_short_step_gets_a_compact_summary(self) -> None:
         clock = _Clock()
         output = StringIO()
@@ -32,13 +39,21 @@ class ProgressRendererTests(unittest.TestCase):
         )
 
         renderer(_update(0.1))
-        clock.now = 13
-        renderer(_update(0.5))
+        for elapsed, fraction in (
+            (10, 0.2),
+            (11, 0.3),
+            (12, 0.4),
+            (13, 0.5),
+            (14, 0.6),
+            (15, 0.7),
+        ):
+            clock.now = elapsed
+            renderer(_update(fraction))
         renderer.finish()
 
-        self.assertIn(" 50.0 % — Titre en cours", output.getvalue())
-        self.assertIn("100.0 % — Analyse du disque terminée en 13 s", output.getvalue())
-        self.assertIn("reste ~13 s", output.getvalue())
+        self.assertIn(" 70.0 % — Titre en cours", output.getvalue())
+        self.assertIn("100.0 % — Analyse du disque terminée en 15 s", output.getvalue())
+        self.assertIn("· ~", output.getvalue())
 
     def test_new_step_reuses_the_same_line(self) -> None:
         clock = _Clock()

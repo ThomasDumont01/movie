@@ -189,11 +189,10 @@ def _validate_conversion_settings(
             OutputQuality.BALANCED,
             OutputQuality.COMPACT,
         },
-        OutputFormat.M4A: {
+        OutputFormat.M4V: {
             OutputQuality.HIGH,
             OutputQuality.BALANCED,
             OutputQuality.COMPACT,
-            OutputQuality.LOSSLESS,
         },
     }
     if output_quality not in allowed[output_format]:

@@ -11,7 +11,6 @@ from movie.core.models import (
     MovieError,
     MovieMetadata,
     OutputFormat,
-    OutputQuality,
     ProbedMedia,
 )
 
@@ -125,40 +124,31 @@ def validate_extracted_title(
 def validate_conversion_request(
     plan: ConvertPlan,
     source: ProbedMedia,
-    *,
-    audio_track: int | None,
 ) -> None:
     """Valide les flux nécessaires au format demandé."""
 
     videos = tuple(stream for stream in source.streams if stream.kind == "video")
-    audios = tuple(stream for stream in source.streams if stream.kind == "audio")
-    if plan.output_format is OutputFormat.MP4 and not videos:
-        raise MovieError("La conversion MP4 nécessite une piste vidéo.")
-    if plan.output_format is OutputFormat.M4A:
-        if not audios:
-            raise MovieError("La source ne contient aucune piste audio.")
-        if audio_track is None or not 0 <= audio_track < len(audios):
-            selected = "aucune" if audio_track is None else str(audio_track)
-            raise MovieError(
-                f"La piste audio {selected} n'existe pas ; "
-                f"choix possibles : 0 à {len(audios) - 1}."
-            )
+    if plan.output_format in {OutputFormat.MP4, OutputFormat.M4V} and not videos:
+        raise MovieError(
+            f"La conversion {plan.output_format.value.upper()} nécessite "
+            "une piste vidéo."
+        )
 
 
 def validate_conversion(
     plan: ConvertPlan,
     source: ProbedMedia,
     output: ProbedMedia,
-    *,
-    audio_track: int | None,
 ) -> tuple[str, ...]:
     """Vérifie le conteneur, les codecs et les flux du fichier converti."""
 
     if plan.output_format is OutputFormat.MKV:
         return _validate_mkv(source, output)
-    if plan.output_format is OutputFormat.MP4:
-        return _validate_mp4(source, output)
-    return _validate_m4a(plan, source, output, audio_track=audio_track)
+    return _validate_video_output(
+        source,
+        output,
+        label=plan.output_format.value.upper(),
+    )
 
 
 def validate_preserved_media(
@@ -290,65 +280,38 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
     return ()
 
 
-def _validate_mp4(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
+def _validate_video_output(
+    source: ProbedMedia,
+    output: ProbedMedia,
+    *,
+    label: str,
+) -> tuple[str, ...]:
     videos = tuple(stream for stream in output.streams if stream.kind == "video")
     audios = tuple(stream for stream in output.streams if stream.kind == "audio")
     source_audios = tuple(stream for stream in source.streams if stream.kind == "audio")
     if not videos or videos[0].codec != "h264":
-        raise MovieError("Le MP4 vérifié ne contient pas de vidéo H.264.")
+        raise MovieError(f"Le {label} vérifié ne contient pas de vidéo H.264.")
     if len(audios) < len(source_audios):
-        raise MovieError("Le MP4 a perdu une ou plusieurs pistes audio.")
+        raise MovieError(f"Le {label} a perdu une ou plusieurs pistes audio.")
     if any(stream.codec != "aac" for stream in audios):
-        raise MovieError("Toutes les pistes audio du MP4 doivent être en AAC.")
-    _validate_languages(source_audios, audios, "MP4")
-    _validate_duration(source, output, "MP4")
+        raise MovieError(f"Toutes les pistes audio du {label} doivent être en AAC.")
+    _validate_languages(source_audios, audios, label)
+    _validate_duration(source, output, label)
 
     warnings: list[str] = []
     subtitle_count = sum(stream.kind == "subtitle" for stream in source.streams)
     if subtitle_count:
         warnings.append(
-            f"{subtitle_count} piste(s) de sous-titres ne sont pas intégrées au MP4 ; "
+            f"{subtitle_count} piste(s) de sous-titres ne sont pas intégrées au "
+            f"{label} ; "
             "utilise le MKV pour les conserver sans compromis."
         )
     if source.chapter_count and output.chapter_count < source.chapter_count:
         warnings.append(
-            f"Le MP4 contient {output.chapter_count} chapitre(s), contre "
+            f"Le {label} contient {output.chapter_count} chapitre(s), contre "
             f"{source.chapter_count} dans la source."
         )
     return tuple(warnings)
-
-
-def _validate_m4a(
-    plan: ConvertPlan,
-    source: ProbedMedia,
-    output: ProbedMedia,
-    *,
-    audio_track: int | None,
-) -> tuple[str, ...]:
-    audios = tuple(stream for stream in output.streams if stream.kind == "audio")
-    expected_codec = "alac" if plan.output_quality is OutputQuality.LOSSLESS else "aac"
-    if len(audios) != 1 or audios[0].codec != expected_codec:
-        raise MovieError(
-            f"Le M4A doit contenir exactement une piste audio {expected_codec.upper()}."
-        )
-    _validate_duration(source, output, "M4A")
-    source_audios = tuple(stream for stream in source.streams if stream.kind == "audio")
-    assert audio_track is not None
-    selected = source_audios[audio_track]
-    if selected.language and audios[0].language != selected.language:
-        raise MovieError("Le M4A a perdu la langue de la piste audio sélectionnée.")
-
-    ignored = sum(
-        stream.kind in {"video", "subtitle"} for stream in source.streams
-    ) + max(0, len(source_audios) - 1)
-    if ignored:
-        return (
-            (
-                f"{ignored} piste(s) non audio ou non sélectionnée(s) ont été "
-                "volontairement exclues du M4A."
-            ),
-        )
-    return ()
 
 
 def _validate_languages(

@@ -3,7 +3,7 @@
 Movie est un outil macOS interactif pour numériser, convertir et renseigner des
 médias sans avoir à connaître MakeMKV, FFmpeg ou les codecs.
 
-La version publique actuelle est **0.1.0**.
+La version publique actuelle est **0.2.0**.
 
 Son interface repose sur quelques commandes sans paramètres techniques :
 
@@ -20,6 +20,16 @@ uv run movie config
 Movie pose ensuite uniquement les questions nécessaires. Les commandes
 opérationnelles `scan`, `rip`, `convert` et `tag` n'acceptent volontairement pas
 d'options comme `--profile`, `--title` ou `--metadata-url`.
+
+Pour choisir sans réfléchir :
+
+- un DVD à archiver fidèlement : `uv run movie rip` ;
+- un fichier ou une ISO à changer de format : `uv run movie convert` ;
+- un titre, une année ou une jaquette à ajouter : `uv run movie tag` ;
+- seulement voir le contenu du DVD : `uv run movie scan`.
+
+Tu peux coller un chemin ou glisser un fichier depuis Finder dans Terminal ;
+les espaces, guillemets et antislashs ajoutés par macOS sont acceptés.
 
 ## Installation
 
@@ -124,22 +134,21 @@ multimédia ordinaire est lu directement avec FFmpeg.
 | MP4 | qualité maximale | H.264 CRF 18, audio AAC 320 kbit/s |
 | MP4 | équilibré | H.264 CRF 21, audio AAC 256 kbit/s |
 | MP4 | compact | H.264 CRF 25, audio AAC 160 kbit/s |
-| M4A | qualité maximale | une piste audio AAC 320 kbit/s |
-| M4A | équilibré | une piste audio AAC 256 kbit/s |
-| M4A | compact | une piste audio AAC 160 kbit/s |
-| M4A | sans perte supplémentaire | une piste audio ALAC |
+| M4V | qualité maximale | H.264 CRF 18, audio AAC 320 kbit/s |
+| M4V | équilibré | H.264 CRF 21, audio AAC 256 kbit/s |
+| M4V | compact | H.264 CRF 25, audio AAC 160 kbit/s |
 
-Le profil équilibré est recommandé dans la majorité des cas. Une conversion en
-ALAC n'améliore pas une source déjà compressée ; elle évite seulement une perte
-supplémentaire.
+Le profil équilibré est recommandé dans la majorité des cas. MP4 et M4V
+contiennent ici les mêmes codecs H.264/AAC. Choisis MP4 pour l'extension la plus
+universelle, ou M4V lorsqu'une application Apple attend explicitement cette
+extension vidéo.
 
 Une ISO destinée au MKV est extraite puis publiée directement, sans remuxage
-inutile. Pour un M4A créé depuis un fichier, Movie demande la piste audio si
-plusieurs pistes sont présentes. Pour un ISO, ce choix intervient après
-l'extraction : Movie inspecte le MKV réellement produit afin qu'une piste
-supprimée ou réordonnée par MakeMKV ne puisse pas fausser la sélection. Les
-sous-titres bitmap des DVD ne sont pas copiés silencieusement vers un MP4 :
-leur exclusion est annoncée et le MKV est recommandé pour les conserver.
+inutile. Une ISO destinée au MP4 ou au M4V est d'abord extraite en MKV
+temporaire, vérifiée, puis convertie. Toutes les pistes audio sont conservées.
+Les sous-titres bitmap des DVD ne sont pas copiés silencieusement vers un MP4
+ou un M4V : leur exclusion est annoncée et le MKV est recommandé pour les
+conserver.
 
 Le fichier converti est créé dans le dossier configuré ou, par défaut, à côté
 de la source. Une destination existante n'est jamais remplacée.
@@ -156,7 +165,7 @@ pas modifiée.
 uv run movie tag
 ```
 
-`tag` fonctionne sur MKV, MP4 et M4A. Movie demande le fichier puis propose deux
+`tag` fonctionne sur MKV, MP4 et M4V. Movie demande le fichier puis propose deux
 modes.
 
 ### Film officiel avec TMDB
@@ -206,14 +215,14 @@ L'assistant configure :
 - le lecteur optique par défaut ;
 - le format et la qualité de conversion proposés ;
 - `auto_run`, qui retire la confirmation finale lorsque tous les choix sont
-  connus ;
+connus ;
 - le son d'alerte avant une question bloquante ;
 - le délai avant l'affichage de la barre de progression ;
 - l'ouverture automatique de la recherche TMDB pendant `tag`.
 
 La configuration est enregistrée dans `~/.config/movie/config.json`. Même avec
-`auto_run`, Movie demande toujours une décision lorsqu'un titre de DVD/ISO, une
-piste audio ou une fiche TMDB ne peut pas être choisi sans risque.
+`auto_run`, Movie demande toujours une décision lorsqu'un titre de DVD/ISO ou
+une fiche TMDB ne peut pas être choisi sans risque.
 
 ## Progression, erreurs et fichiers temporaires
 
@@ -280,38 +289,36 @@ uv run ruff check src tests
 uv run pyright
 ```
 
-État vérifié le 28 septembre 2026 pour la version 0.1.0 :
+État vérifié le 28 septembre 2026 pour la version 0.2.0 :
 
-- 140 tests et 13 sous-tests réussissent ;
-- la couverture automatisée atteint 83 % des lignes ;
+- 143 tests et 13 sous-tests réussissent ;
+- la couverture automatisée atteint 85 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;
 - les outils de développement sont déclarés et verrouillés dans le projet ;
 - la distribution source et la wheel se construisent correctement ;
-- de vrais appels FFmpeg/ffprobe vérifient MKV, MP4 H.264/AAC, M4A AAC,
-  M4A ALAC, métadonnées manuelles/TMDB et remplacement des jaquettes ;
+- de vrais appels FFmpeg/ffprobe vérifient MKV, MP4 H.264/AAC, M4V H.264/AAC,
+  métadonnées manuelles/TMDB et remplacement des jaquettes ;
 - la fiche TMDB fournie pour *Star Wars : L'Ascension de Skywalker* et sa
-  jaquette ont été récupérées puis intégrées dans un MKV temporaire réel ;
-- le parcours interactif réel de `movie tag`, sans argument, a été validé sur
-  un média synthétique.
+  jaquette ont été récupérées puis intégrées dans un vrai extrait MKV du DVD ;
+- le DVD physique `THE_RISE_OF_SKYWALKER` a été détecté et analysé ;
+- le titre principal 0 a été extrait intégralement en 32 min 46 s, puis relu
+  par ffprobe et décodé de bout en bout par FFmpeg sans erreur ;
+- le MKV final dure 2:16:04.2 et contient 1 vidéo, 3 audios, 7 sous-titres et
+  44 chapitres ; MakeMKV en annonçait 45, différence conservée comme
+  avertissement non destructif ;
+- les profils MP4 et M4V sont aussi exécutés sur un extrait réel de ce film.
 
-Un essai matériel réel a détecté le DVD `THE_RISE_OF_SKYWALKER`, analysé ses
-cinq titres et extrait puis vérifié le titre court 3. Le long métrage complet
-n'a pas été extrait : les titres 0, 1 et 2 ont tous une durée de 2:15:44 et
-nécessitent un choix humain.
+## Limites, expliquées simplement
 
-## Limites connues
-
-- MakeMKV reste nécessaire pour ouvrir les DVD et les ISO ;
-- les supports ou protections refusés par MakeMKV restent hors du contrôle de
-  Movie ;
-- les menus DVD ne sont pas représentés dans MKV, MP4 ou M4A ;
-- les sous-titres bitmap ne sont ni convertis par OCR ni incrustés en MP4 ;
-- la détection et la correction automatiques de l'entrelacement ne sont pas
-  encore implémentées ;
-- le traitement simultané de plusieurs épisodes ou titres n'est pas pris en
-  charge ;
-- aucune image ISO réelle ni aucun Blu-ray/UHD n'a encore été qualifié avec un
-  support physique ;
-- l'identification TMDB lit la page publique choisie par l'utilisateur et peut
-  nécessiter une adaptation si le site change.
+| Limite | Ce que cela signifie concrètement | Choix conseillé |
+| --- | --- | --- |
+| MakeMKV reste nécessaire | Movie pilote MakeMKV ; il ne réimplémente ni la lecture optique ni le déchiffrement. Si MakeMKV refuse un disque, Movie ne peut pas le forcer. | Vérifier d'abord le disque dans MakeMKV et relancer `doctor`. |
+| `rip` accepte les DVD | Le parcours de numérisation physique n'est pas encore qualifié pour Blu-ray ou UHD. | Utiliser un DVD, ou convertir ensuite une ISO que MakeMKV sait ouvrir. |
+| Un titre est extrait à la fois | Un disque de série avec plusieurs épisodes demande une exécution par épisode. | Relancer `rip` ou `convert` pour chaque titre voulu. |
+| Les menus ne sont pas conservés | Le MKV, MP4 ou M4V contient le film et ses pistes, pas l'interface interactive du DVD. | Conserver une image complète du disque si les menus sont indispensables. |
+| Les sous-titres DVD sont des images | Ils restent dans le MKV, mais ne sont pas transformés en texte et ne sont pas intégrés au MP4/M4V. | Choisir MKV pour conserver tous les sous-titres. |
+| Pas de désentrelacement automatique | Certains anciens DVD peuvent montrer des lignes pendant les mouvements. Movie préfère préserver la source plutôt qu'appliquer un filtre potentiellement mauvais. | Lire le MKV avec un lecteur qui désentrelace, ou ajouter plus tard un profil dédié. |
+| Pas d'export audio seul | M4V est un format vidéo. Movie produit donc une vidéo H.264 avec ses pistes AAC, comme pour MP4. | Employer FFmpeg directement si le besoin est uniquement d'extraire le son. |
+| TMDB est lu sans clé API | Movie analyse la page publique choisie. Un changement du site peut temporairement casser l'identification. | Utiliser la saisie manuelle si TMDB est indisponible. |
+| ISO physique encore à qualifier en 0.2.0 | La pipeline ISO est couverte par les tests automatisés, mais aucune copie ISO complète de ce DVD n'a été menée jusqu'au bout pour cette version. | Conserver le MKV issu de `rip` comme résultat matériel validé. |

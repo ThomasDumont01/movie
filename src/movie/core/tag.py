@@ -26,7 +26,7 @@ from movie.core.verification import (
 )
 from movie.core.workflow import phase_callback, report_stage
 
-_SUPPORTED_SUFFIXES = {".mkv", ".mp4", ".m4a"}
+_SUPPORTED_SUFFIXES = {".mkv", ".mp4", ".m4v"}
 
 
 class _ProbeBackend(Protocol):
@@ -55,7 +55,7 @@ def build_tag_plan(source: Path | str, metadata: MovieMetadata) -> TagPlan:
     if not source_path.is_file():
         raise MovieError(f"Le fichier à enrichir est introuvable : {source_path}")
     if source_path.suffix.casefold() not in _SUPPORTED_SUFFIXES:
-        raise MovieError("La commande tag accepte uniquement les fichiers MKV, MP4 et M4A.")
+        raise MovieError("La commande tag accepte uniquement les fichiers MKV, MP4 et M4V.")
 
     title = " ".join(metadata.title.split())
     if not title:

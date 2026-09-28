@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 import sys
@@ -14,7 +15,6 @@ from typing import TextIO
 from movie.core.models import (
     DiscTitle,
     Drive,
-    MediaStream,
     MovieError,
     ProgressUpdate,
 )
@@ -74,18 +74,6 @@ def _prompt_for_title(candidates: Sequence[DiscTitle]) -> int:
         print(f"Choix invalide. Saisis l'un des numéros suivants : {choices}.")
 
 
-def _prompt_for_audio_track(streams: Sequence[MediaStream]) -> int:
-    print("Plusieurs pistes audio sont disponibles :")
-    for index, stream in enumerate(streams):
-        print(f"  [{index}] {_stream_label(stream)}")
-    choices = ", ".join(str(index) for index in range(len(streams)))
-    while True:
-        selected = _prompt_int(f"Choisis une piste audio ({choices})")
-        if 0 <= selected < len(streams):
-            return selected
-        print(f"Choix invalide. Saisis l'un des numéros suivants : {choices}.")
-
-
 def _prompt_for_drive(drives: Sequence[Drive]) -> int:
     """Affiche les lecteurs disponibles et demande lequel utiliser."""
 
@@ -114,7 +102,7 @@ def _prompt_path(label: str, *, default: str | None = None) -> Path:
         answer = _read_answer(prompt)
         value = answer or default
         if value:
-            return Path(value).expanduser()
+            return _path_from_input(value)
         print("Un chemin est nécessaire.")
 
 
@@ -132,10 +120,10 @@ def _prompt_optional_path(label: str, *, default: str | None = None) -> Path | N
     shown_default = default or "non configuré"
     answer = _read_answer(f"{label} [{shown_default}] (- pour effacer) : ")
     if not answer:
-        return Path(default).expanduser() if default else None
+        return _path_from_input(default) if default else None
     if answer == "-":
         return None
-    return Path(answer).expanduser()
+    return _path_from_input(answer)
 
 
 def _prompt_optional_existing_file(label: str) -> Path | None:
@@ -145,7 +133,7 @@ def _prompt_optional_existing_file(label: str) -> Path | None:
         answer = _read_answer(f"{label} [aucun] : ")
         if not answer:
             return None
-        path = Path(answer).expanduser().resolve()
+        path = _path_from_input(answer).resolve()
         if path.is_file():
             return path
         print(f"Fichier introuvable : {path}")
@@ -279,6 +267,20 @@ def _read_answer(prompt: str) -> str:
         raise MovieError("Saisie annulée.") from error
 
 
+def _path_from_input(value: str) -> Path:
+    """Accepte aussi les chemins glissés dans Terminal (guillemets ou antislash)."""
+
+    normalized = value
+    if "\\" in value or value[:1] in {'"', "'"}:
+        try:
+            parts = shlex.split(value)
+        except ValueError:
+            parts = []
+        if len(parts) == 1:
+            normalized = parts[0]
+    return Path(normalized).expanduser()
+
+
 def _alert_user(enabled: bool) -> None:
     """Joue discrètement le son système macOS avant une question bloquante."""
 
@@ -370,13 +372,6 @@ def _media_summary(stream_types: Sequence[str]) -> str:
     ) or "aucune piste utile"
 
 
-def _stream_label(stream: MediaStream) -> str:
-    details = [stream.codec or "codec inconnu"]
-    if stream.language:
-        details.append(stream.language)
-    return " · ".join(details)
-
-
 class _ProgressRenderer:
     """Maintient une seule barre monotone pendant toute une opération longue."""
 
@@ -404,7 +399,8 @@ class _ProgressRenderer:
         self._last_rendered_at: float | None = None
         self._last_rendered_fraction: float | None = None
         self._last_rendered_label: str | None = None
-        self._estimated_total_seconds: float | None = None
+        self._estimated_remaining_seconds: float | None = None
+        self._progress_samples: list[tuple[float, float]] = []
         self._bar_width = max(
             12,
             min(30, (shutil.get_terminal_size(fallback=(80, 24)).columns - 45)),
@@ -560,13 +556,18 @@ class _ProgressRenderer:
         now: float,
         show_eta: bool = True,
     ) -> None:
-        bar = _progress_bar(fraction, width=self._bar_width)
         percentage = fraction * 100
         terminal_width = shutil.get_terminal_size(fallback=(80, 24)).columns
-        reserved = self._bar_width + 14
-        label_width = max(12, terminal_width - reserved)
         eta = self._remaining_time(fraction, now) if show_eta else None
-        eta_suffix = f" · reste ~{_format_timespan(eta)}" if eta is not None else ""
+        eta_suffix = f" · ~{_format_eta(eta)}" if eta is not None else ""
+        desired_status_width = len(label) + len(eta_suffix)
+        bar_width = min(
+            self._bar_width,
+            max(12, terminal_width - 14 - desired_status_width),
+        )
+        bar = _progress_bar(fraction, width=bar_width)
+        reserved = bar_width + 14
+        label_width = max(12, terminal_width - reserved)
         label_space = max(1, label_width - len(eta_suffix))
         status = f"{label[:label_space]}{eta_suffix}"[:label_width]
         self._stream.write(
@@ -587,17 +588,37 @@ class _ProgressRenderer:
 
     def _remaining_time(self, fraction: float, now: float) -> float | None:
         elapsed = self._elapsed(now)
-        if elapsed < 3 or not 0.02 <= fraction < 0.99:
+        if elapsed < 10 or not 0.05 <= fraction < 0.99:
             return None
-        estimate = elapsed / fraction
-        if self._estimated_total_seconds is None:
-            self._estimated_total_seconds = estimate
+        self._progress_samples.append((elapsed, fraction))
+        self._progress_samples = [
+            sample
+            for sample in self._progress_samples[-30:]
+            if elapsed - sample[0] <= 30
+        ]
+        rates = [
+            (current_fraction - previous_fraction) / (current_time - previous_time)
+            for (previous_time, previous_fraction), (current_time, current_fraction)
+            in zip(self._progress_samples, self._progress_samples[1:])
+            if current_time > previous_time
+            and current_fraction > previous_fraction
+        ]
+        if len(rates) < 3:
+            return None
+        ordered = sorted(rates[-15:])
+        rate = ordered[len(ordered) // 2]
+        estimate = (1.0 - fraction) / rate
+        if self._estimated_remaining_seconds is None:
+            self._estimated_remaining_seconds = estimate
         else:
-            self._estimated_total_seconds = (
-                self._estimated_total_seconds * 0.8 + estimate * 0.2
+            self._estimated_remaining_seconds = (
+                self._estimated_remaining_seconds * 0.7 + estimate * 0.3
             )
-        remaining = self._estimated_total_seconds - elapsed
-        return remaining if remaining >= 1 else None
+        return (
+            self._estimated_remaining_seconds
+            if self._estimated_remaining_seconds >= 1
+            else None
+        )
 
 
 def _progress_bar(fraction: float, *, width: int = 20) -> str:
@@ -616,6 +637,19 @@ def _format_timespan(seconds: float) -> str:
     if minutes:
         return f"{minutes} min {remaining_seconds:02} s"
     return f"{remaining_seconds} s"
+
+
+def _format_eta(seconds: float) -> str:
+    """Formate une estimation compacte afin de préserver le libellé d'étape."""
+
+    rounded = max(1, round(seconds))
+    if rounded < 60:
+        return f"{rounded} s"
+    total_minutes = max(1, round(rounded / 60))
+    hours, minutes = divmod(total_minutes, 60)
+    if hours:
+        return f"{hours} h" if minutes == 0 else f"{hours} h {minutes:02} min"
+    return f"{minutes} min"
 
 
 def _progress_label(label: str) -> str:

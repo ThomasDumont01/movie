@@ -12,7 +12,6 @@ from movie.core.models import (
     ConvertResult,
     DiscScan,
     DiscTitle,
-    MediaStream,
     MovieError,
     OutputExistsError,
     OutputFormat,
@@ -67,7 +66,6 @@ class _ConverterBackend(Protocol):
         *,
         output_format: OutputFormat,
         quality: OutputQuality,
-        audio_track: int | None = None,
         duration_seconds: float | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path: ...
@@ -80,7 +78,6 @@ def build_convert_plan(
     output_quality: OutputQuality | str | None = None,
     output: Path | str | None = None,
     output_directory: Path | str | None = None,
-    audio_track: int | None = None,
     iso_title: DiscTitle | None = None,
     source_media: ProbedMedia | None = None,
 ) -> ConvertPlan:
@@ -103,14 +100,6 @@ def build_convert_plan(
         raise MovieError("L'analyse d'un fichier ne peut pas être associée à une ISO.")
     if source_media is not None and source_media.path.resolve() != source_path:
         raise MovieError("L'analyse fournie ne correspond pas au fichier source.")
-    if selected_format is OutputFormat.M4A:
-        if audio_track is not None and audio_track < 0:
-            raise MovieError("Le M4A nécessite le choix d'une piste audio.")
-        if not is_iso and audio_track is None:
-            raise MovieError("Le M4A nécessite le choix d'une piste audio.")
-    elif audio_track is not None:
-        raise MovieError("Le choix d'une piste audio concerne uniquement le M4A.")
-
     destination = _destination_path(
         source_path,
         selected_format,
@@ -130,7 +119,6 @@ def build_convert_plan(
         output=destination,
         output_format=selected_format,
         output_quality=selected_quality,
-        audio_track=audio_track,
         iso_title=iso_title,
         source_media=source_media,
     )
@@ -143,7 +131,7 @@ def conversion_settings(
     try:
         selected_format = OutputFormat(output_format)
     except ValueError as error:
-        raise MovieError("Le format de sortie doit être mkv, mp4 ou m4a.") from error
+        raise MovieError("Le format de sortie doit être mkv, mp4 ou m4v.") from error
 
     if output_quality is None:
         selected_quality = (
@@ -156,7 +144,7 @@ def conversion_settings(
             selected_quality = OutputQuality(output_quality)
         except ValueError as error:
             raise MovieError(
-                "Le profil doit être source, high, balanced, compact ou lossless."
+                "Le profil doit être source, high, balanced ou compact."
             ) from error
 
     allowed = {
@@ -166,11 +154,10 @@ def conversion_settings(
             OutputQuality.BALANCED,
             OutputQuality.COMPACT,
         },
-        OutputFormat.M4A: {
+        OutputFormat.M4V: {
             OutputQuality.HIGH,
             OutputQuality.BALANCED,
             OutputQuality.COMPACT,
-            OutputQuality.LOSSLESS,
         },
     }
     if selected_quality not in allowed[selected_format]:
@@ -199,7 +186,6 @@ class ConversionService:
         plan: ConvertPlan,
         *,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
-        select_audio_track: Callable[[tuple[MediaStream, ...]], int] | None = None,
     ) -> ConvertResult:
         prepare_destination(plan.output)
         _ensure_free_space(plan)
@@ -248,16 +234,7 @@ class ConversionService:
                 validate_source(source_media)
                 source_ready = 0.04
 
-            audio_track = _resolve_audio_track(
-                plan,
-                source_media,
-                select_audio_track=select_audio_track,
-            )
-            validate_conversion_request(
-                plan,
-                source_media,
-                audio_track=audio_track,
-            )
+            validate_conversion_request(plan, source_media)
             report_stage(
                 on_progress,
                 "Analyse du fichier source",
@@ -275,7 +252,6 @@ class ConversionService:
                     staged_output,
                     output_format=plan.output_format,
                     quality=plan.output_quality,
-                    audio_track=audio_track,
                     duration_seconds=source_media.duration_seconds,
                     on_progress=phase_callback(
                         on_progress,
@@ -295,7 +271,6 @@ class ConversionService:
                         plan,
                         source_media,
                         output_media,
-                        audio_track=audio_track,
                     )
                 )
 
@@ -367,29 +342,6 @@ def _bounded_filename(stem: str, suffix: str) -> str:
     if len(encoded) > available:
         normalized = encoded[:available].decode("utf-8", errors="ignore").rstrip(" .")
     return f"{normalized or 'media'}{suffix}"
-
-
-def _resolve_audio_track(
-    plan: ConvertPlan,
-    source: ProbedMedia,
-    *,
-    select_audio_track: Callable[[tuple[MediaStream, ...]], int] | None,
-) -> int | None:
-    if plan.output_format is not OutputFormat.M4A:
-        return None
-    audios = tuple(stream for stream in source.streams if stream.kind == "audio")
-    if plan.iso_title is None:
-        return plan.audio_track
-    if len(audios) == 1:
-        return 0
-    if not audios:
-        return None
-    if select_audio_track is None:
-        raise MovieError(
-            "Plusieurs pistes audio ont été extraites de l'ISO ; "
-            "une sélection utilisateur est nécessaire."
-        )
-    return select_audio_track(audios)
 
 
 def _make_mkv_diagnostics(run: object) -> tuple[str, ...]:

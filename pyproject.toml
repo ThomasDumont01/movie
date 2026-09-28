@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "movie"
-version = "0.1.0"
+version = "0.2.0"
 description = "Numérisation DVD et conversion multimédia fiables et interactives."
 readme = "README.md"
 requires-python = ">=3.12"

@@ -83,6 +83,20 @@ class InteractivePromptTests(TestCase):
             Path("~/Films").expanduser(),
         )
 
+    @patch("builtins.input", return_value=r"/tmp/Mon\ Film/video.mkv")
+    def test_path_accepts_terminal_drag_and_drop_escaping(self, _input: object) -> None:
+        self.assertEqual(
+            _prompt_path("Source"),
+            Path("/tmp/Mon Film/video.mkv"),
+        )
+
+    @patch("builtins.input", return_value="'/tmp/Mon Film/video.mkv'")
+    def test_path_accepts_surrounding_quotes(self, _input: object) -> None:
+        self.assertEqual(
+            _prompt_path("Source"),
+            Path("/tmp/Mon Film/video.mkv"),
+        )
+
     @patch("builtins.input", return_value="oui")
     def test_confirmation_accepts_french_yes(self, _input: object) -> None:
         self.assertTrue(_prompt_yes_no("Continuer ?"))
@@ -329,6 +343,44 @@ class CommandFlowTests(TestCase):
             service.execute.assert_called_once()
             plan = service.execute.call_args.args[0]
             self.assertIs(plan.source_media, source_media)
+
+    @patch("movie.__main__.load_config")
+    @patch("movie.__main__._conversion_service")
+    def test_audio_only_source_is_refused_before_video_output_recap(
+        self, service_factory: MagicMock, load: MagicMock
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "audio-only.mkv"
+            source.write_bytes(b"source")
+            service = service_factory.return_value
+            service.probe.probe.return_value = ProbedMedia(
+                source,
+                120,
+                ("audio",),
+                0,
+                streams=(MediaStream("audio", "fra", "aac"),),
+            )
+            load.return_value = MovieConfig(
+                output_directory=Path(temporary_directory),
+                auto_run=True,
+                alert_sound=False,
+                convert_format=OutputFormat.M4V,
+                convert_quality=OutputQuality.BALANCED,
+            )
+            output = StringIO()
+            errors = StringIO()
+
+            with (
+                patch("builtins.input", return_value=str(source)),
+                redirect_stdout(output),
+                redirect_stderr(errors),
+            ):
+                result = main(["convert"])
+
+            self.assertEqual(result, 2)
+            self.assertIn("nécessite une piste vidéo", errors.getvalue())
+            self.assertNotIn("Récapitulatif", output.getvalue())
+            service.execute.assert_not_called()
 
     def test_operational_commands_do_not_expose_technical_arguments(self) -> None:
         with self.assertRaises(SystemExit):

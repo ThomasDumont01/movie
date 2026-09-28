@@ -29,7 +29,7 @@ def conversion_required_bytes(
     source_size = source.stat().st_size
     if iso_title is not None and iso_title.size_bytes:
         source_size = iso_title.size_bytes
-    # Une conversion ISO vers MP4/M4A conserve simultanément le MKV extrait et
+    # Une conversion ISO vers MP4/M4V conserve simultanément le MKV extrait et
     # le fichier final. Toute autre conversion ne crée qu'une nouvelle sortie.
     copies = 2 if iso_title is not None and output_format is not OutputFormat.MKV else 1
     return source_size * copies + PUBLICATION_MARGIN_BYTES

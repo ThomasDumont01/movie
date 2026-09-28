@@ -255,7 +255,7 @@ class FfmpegIntegrationTests(TestCase):
             self.assertIn("attachment", media.stream_types)
             self.assertEqual(tags.get("title"), metadata.title)
 
-    def test_real_mkv_m4a_aac_and_m4a_alac_outputs_are_readable(self) -> None:
+    def test_real_mkv_mp4_and_m4v_outputs_are_readable(self) -> None:
         assert FFMPEG is not None
         assert FFPROBE is not None
         with TemporaryDirectory() as temporary_directory:
@@ -292,32 +292,28 @@ class FfmpegIntegrationTests(TestCase):
                     directory / "copy.mkv",
                     OutputFormat.MKV,
                     OutputQuality.SOURCE,
-                    None,
                     "pcm_s16le",
                 ),
                 (
-                    directory / "audio.m4a",
-                    OutputFormat.M4A,
+                    directory / "video.mp4",
+                    OutputFormat.MP4,
                     OutputQuality.BALANCED,
-                    0,
                     "aac",
                 ),
                 (
-                    directory / "lossless.m4a",
-                    OutputFormat.M4A,
-                    OutputQuality.LOSSLESS,
-                    0,
-                    "alac",
+                    directory / "video.m4v",
+                    OutputFormat.M4V,
+                    OutputQuality.BALANCED,
+                    "aac",
                 ),
             )
-            for output, output_format, quality, audio_track, expected_audio in outputs:
+            for output, output_format, quality, expected_audio in outputs:
                 with self.subTest(output=output.name):
                     converter.convert(
                         source,
                         output,
                         output_format=output_format,
                         quality=quality,
-                        audio_track=audio_track,
                     )
                     media = MediaProbe(FFPROBE).probe(output)
                     codecs = {
@@ -326,10 +322,15 @@ class FfmpegIntegrationTests(TestCase):
                         if stream.kind == "audio"
                     }
                     self.assertIn(expected_audio, codecs)
+                    if output_format is not OutputFormat.MKV:
+                        self.assertIn(
+                            ("video", "h264"),
+                            {(stream.kind, stream.codec) for stream in media.streams},
+                        )
                     self.assertGreater(output.stat().st_size, 0)
 
     @patch("movie.enrichment.prepare_artwork")
-    def test_real_m4a_tagging_preserves_audio_and_adds_cover(
+    def test_real_m4v_tagging_preserves_media_and_adds_cover(
         self,
         prepare_artwork: MagicMock,
     ) -> None:
@@ -337,8 +338,9 @@ class FfmpegIntegrationTests(TestCase):
         assert FFPROBE is not None
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
-            source = directory / "source.m4a"
-            output = directory / "tagged.m4a"
+            intermediate = directory / "source.mkv"
+            source = directory / "source.m4v"
+            output = directory / "tagged.m4v"
             poster = directory / "cover.ppm"
             poster.write_bytes(b"P6\n2 2\n255\n" + bytes((30, 120, 200)) * 4)
             prepare_artwork.return_value = (poster, "image/jpeg")
@@ -350,16 +352,29 @@ class FfmpegIntegrationTests(TestCase):
                     "-f",
                     "lavfi",
                     "-i",
+                    "color=size=32x32:rate=10:duration=1",
+                    "-f",
+                    "lavfi",
+                    "-i",
                     "sine=frequency=440:duration=1",
+                    "-shortest",
+                    "-c:v",
+                    "ffv1",
                     "-c:a",
-                    "aac",
-                    str(source),
+                    "pcm_s16le",
+                    str(intermediate),
                 ],
                 check=False,
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(generated.returncode, 0, generated.stderr)
+            MediaConverter(FFMPEG).convert(
+                intermediate,
+                source,
+                output_format=OutputFormat.M4V,
+                quality=OutputQuality.BALANCED,
+            )
             metadata = MovieMetadata(
                 title="Enregistrement personnel",
                 year=2026,
@@ -378,9 +393,9 @@ class FfmpegIntegrationTests(TestCase):
             media = MediaProbe(FFPROBE).probe(output)
 
             tags = {key.casefold(): value for key, value in media.format_tags}
-            self.assertIn(("audio", "aac"), {
-                (stream.kind, stream.codec) for stream in media.streams
-            })
+            codecs = {(stream.kind, stream.codec) for stream in media.streams}
+            self.assertIn(("video", "h264"), codecs)
+            self.assertIn(("audio", "aac"), codecs)
             self.assertIn("attachment", media.stream_types)
             self.assertEqual(tags.get("title"), metadata.title)
             self.assertIn("2026", tags.get("date", ""))
@@ -392,7 +407,7 @@ class FfmpegIntegrationTests(TestCase):
             directory = Path(temporary_directory)
             mkv = directory / "source.mkv"
             mp4 = directory / "source.mp4"
-            m4a = directory / "source.m4a"
+            m4v = directory / "source.m4v"
             generated = subprocess.run(
                 [
                     FFMPEG,
@@ -427,10 +442,9 @@ class FfmpegIntegrationTests(TestCase):
             )
             converter.convert(
                 mkv,
-                m4a,
-                output_format=OutputFormat.M4A,
+                m4v,
+                output_format=OutputFormat.M4V,
                 quality=OutputQuality.BALANCED,
-                audio_track=0,
             )
             poster = directory / "cover.png"
             poster.write_bytes(
@@ -448,7 +462,7 @@ class FfmpegIntegrationTests(TestCase):
             )
             service = TagService(MediaProbe(FFPROBE), MediaTagger(FFMPEG))
 
-            for source in (mkv, mp4, m4a):
+            for source in (mkv, mp4, m4v):
                 with self.subTest(source=source.suffix):
                     result = service.execute(build_tag_plan(source, metadata))
                     self.assertEqual(result.output, source.resolve())

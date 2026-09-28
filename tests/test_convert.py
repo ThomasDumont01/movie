@@ -29,12 +29,13 @@ class ConvertPlanTests(TestCase):
             source.write_bytes(b"source")
 
             mp4 = build_convert_plan(source, "mp4")
-            m4a = build_convert_plan(source, "m4a", audio_track=0)
+            m4v = build_convert_plan(source, "m4v")
             mkv = build_convert_plan(source, "mkv")
 
             self.assertEqual(mp4.output.name, "film.mp4")
             self.assertIs(mp4.output_quality, OutputQuality.BALANCED)
-            self.assertEqual(m4a.output.name, "film.m4a")
+            self.assertEqual(m4v.output.name, "film.m4v")
+            self.assertIs(m4v.output_quality, OutputQuality.BALANCED)
             self.assertEqual(mkv.output.name, "film.mkv")
             self.assertIs(mkv.output_quality, OutputQuality.SOURCE)
 
@@ -65,21 +66,15 @@ class ConvertPlanTests(TestCase):
             with self.assertRaises(OutputExistsError):
                 build_convert_plan(source, "mp4", output=broken_link)
 
-    def test_iso_requires_a_title_and_m4a_requires_an_audio_choice(self) -> None:
+    def test_iso_requires_an_explicit_title_for_every_output(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             iso = directory / "film.iso"
             iso.write_bytes(b"iso")
-            media = directory / "film.mkv"
-            media.write_bytes(b"mkv")
-
             with self.assertRaisesRegex(MovieError, "titre"):
                 build_convert_plan(iso, "mp4")
-            with self.assertRaisesRegex(MovieError, "piste audio"):
-                build_convert_plan(media, "m4a")
-
-            plan = build_convert_plan(iso, "m4a", iso_title=_iso_title())
-            self.assertIsNone(plan.audio_track)
+            plan = build_convert_plan(iso, "m4v", iso_title=_iso_title())
+            self.assertIs(plan.output_format, OutputFormat.M4V)
 
     def test_invalid_format_profile_pairs_are_refused(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -89,6 +84,8 @@ class ConvertPlanTests(TestCase):
                 build_convert_plan(source, "mp4", output_quality="source")
             with self.assertRaisesRegex(MovieError, "MKV"):
                 build_convert_plan(source, "mkv", output_quality="compact")
+            with self.assertRaisesRegex(MovieError, "M4V"):
+                build_convert_plan(source, "m4v", output_quality="source")
 
 
 class ConversionExecutionTests(TestCase):
@@ -137,36 +134,20 @@ class ConversionExecutionTests(TestCase):
             self.assertEqual(totals[-1], 1.0)
             self.assertEqual(list(directory.glob(".movie-convert-*")), [])
 
-    def test_m4a_validates_selected_audio_and_reports_omitted_streams(self) -> None:
+    def test_m4v_is_converted_verified_and_reports_omitted_subtitles(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             source = directory / "film.mkv"
             source.write_bytes(b"source")
-            plan = build_convert_plan(source, "m4a", audio_track=1)
+            plan = build_convert_plan(source, "m4v")
 
             result = ConversionService(
                 _FakeMakeMkv(), _FakeProbe(), _FakeConverter()
             ).execute(plan)
 
-            self.assertEqual(result.output.suffix, ".m4a")
-            self.assertEqual(result.media.streams[0].language, "eng")
-            self.assertIn("volontairement exclues", result.warnings[0])
-
-    def test_invalid_audio_track_fails_before_conversion(self) -> None:
-        with TemporaryDirectory() as temporary_directory:
-            directory = Path(temporary_directory)
-            source = directory / "film.mkv"
-            source.write_bytes(b"source")
-            plan = build_convert_plan(source, "m4a", audio_track=8)
-            converter = MagicMock()
-
-            with self.assertRaisesRegex(MovieError, "n'existe pas"):
-                ConversionService(
-                    _FakeMakeMkv(), _FakeProbe(), converter
-                ).execute(plan)
-
-            converter.convert.assert_not_called()
-            self.assertFalse(plan.output.exists())
+            self.assertEqual(result.output.suffix, ".m4v")
+            self.assertEqual(result.media.streams[0].codec, "h264")
+            self.assertIn("M4V", result.warnings[0])
 
     def test_iso_to_mkv_publishes_extraction_without_redundant_remux(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -184,26 +165,27 @@ class ConversionExecutionTests(TestCase):
             converter.convert.assert_not_called()
             self.assertEqual(result.output.read_bytes(), b"extracted")
 
-    def test_iso_to_m4a_selects_from_the_extracted_mkv_tracks(self) -> None:
+    def test_iso_to_m4v_extracts_then_converts_all_audio_tracks(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             iso = directory / "film.iso"
             iso.write_bytes(b"iso")
-            plan = build_convert_plan(iso, "m4a", iso_title=_iso_title())
+            plan = build_convert_plan(iso, "m4v", iso_title=_iso_title())
             converter = MagicMock(wraps=_FakeConverter())
-            selector = MagicMock(return_value=1)
 
             result = ConversionService(
                 _FakeMakeMkv(), _FakeProbe(), converter
-            ).execute(plan, select_audio_track=selector)
+            ).execute(plan)
 
-            extracted_audios = selector.call_args.args[0]
             self.assertEqual(
-                tuple(stream.language for stream in extracted_audios),
+                tuple(
+                    stream.language
+                    for stream in result.media.streams
+                    if stream.kind == "audio"
+                ),
                 ("fra", "eng"),
             )
-            self.assertEqual(converter.convert.call_args.kwargs["audio_track"], 1)
-            self.assertEqual(result.media.streams[0].language, "eng")
+            self.assertNotIn("audio_track", converter.convert.call_args.kwargs)
 
     def test_conversion_failure_never_publishes_partial_output(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -262,7 +244,7 @@ class _FakeMakeMkv:
 
 class _FakeProbe:
     def probe(self, path: Path) -> ProbedMedia:
-        if path.suffix == ".mp4":
+        if path.suffix in {".mp4", ".m4v"}:
             return ProbedMedia(
                 path,
                 120,
@@ -273,14 +255,6 @@ class _FakeProbe:
                     MediaStream("audio", "fra", "aac"),
                     MediaStream("audio", "eng", "aac"),
                 ),
-            )
-        if path.suffix == ".m4a":
-            return ProbedMedia(
-                path,
-                120,
-                ("audio",),
-                0,
-                streams=(MediaStream("audio", "eng", "aac"),),
             )
         return ProbedMedia(
             path,
@@ -304,11 +278,10 @@ class _FakeConverter:
         *,
         output_format: OutputFormat,
         quality: OutputQuality,
-        audio_track: int | None = None,
         duration_seconds: float | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path:
-        del source, output_format, quality, audio_track, duration_seconds
+        del source, output_format, quality, duration_seconds
         destination.write_bytes(b"converted")
         if on_progress is not None:
             on_progress(ProgressUpdate("Conversion", None, 1.0, 1.0))

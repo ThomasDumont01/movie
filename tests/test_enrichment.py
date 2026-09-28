@@ -172,35 +172,27 @@ class MediaConverterTests(TestCase):
                 )
 
     @patch("movie.ffmpeg.subprocess.run")
-    def test_m4a_supports_aac_and_lossless_alac(self, run: MagicMock) -> None:
+    def test_m4v_uses_h264_aac_and_selected_profile(self, run: MagicMock) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
 
             def complete(command: list[str], **_: object) -> CompletedProcess[str]:
-                Path(command[-1]).write_bytes(b"m4a")
+                Path(command[-1]).write_bytes(b"m4v")
                 return CompletedProcess(command, 0, "", "")
 
             run.side_effect = complete
-            converter = MediaConverter("ffmpeg-test")
-            converter.convert(
+            result = MediaConverter("ffmpeg-test").convert(
                 directory / "source.mkv",
-                directory / "aac.m4a",
-                output_format=OutputFormat.M4A,
+                directory / "film.m4v",
+                output_format=OutputFormat.M4V,
                 quality=OutputQuality.BALANCED,
-                audio_track=1,
             )
-            aac_command = run.call_args.args[0]
-            self.assertIn("0:a:1", aac_command)
-            self.assertIn("aac", aac_command)
 
-            converter.convert(
-                directory / "source.mkv",
-                directory / "alac.m4a",
-                output_format=OutputFormat.M4A,
-                quality=OutputQuality.LOSSLESS,
-                audio_track=0,
-            )
-            self.assertIn("alac", run.call_args.args[0])
+            self.assertEqual(result.suffix, ".m4v")
+            command = run.call_args.args[0]
+            self.assertIn("libx264", command)
+            self.assertIn("aac", command)
+            self.assertIn("21", command)
 
 
 class PosterDownloadTests(TestCase):

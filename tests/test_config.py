@@ -27,8 +27,8 @@ class ConfigTests(TestCase):
                 alert_sound=False,
                 progress_delay_seconds=8.5,
                 open_browser=False,
-                convert_format=OutputFormat.M4A,
-                convert_quality=OutputQuality.LOSSLESS,
+                convert_format=OutputFormat.M4V,
+                convert_quality=OutputQuality.HIGH,
             )
             self.assertEqual(save_config(expected, path), path)
             self.assertEqual(load_config(path), expected)

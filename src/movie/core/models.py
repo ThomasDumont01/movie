@@ -28,7 +28,7 @@ class OutputFormat(StrEnum):
 
     MKV = "mkv"
     MP4 = "mp4"
-    M4A = "m4a"
+    M4V = "m4v"
 
 
 class OutputQuality(StrEnum):
@@ -38,7 +38,6 @@ class OutputQuality(StrEnum):
     HIGH = "high"
     BALANCED = "balanced"
     COMPACT = "compact"
-    LOSSLESS = "lossless"
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +142,6 @@ class ConvertPlan:
     output: Path
     output_format: OutputFormat
     output_quality: OutputQuality
-    audio_track: int | None = None
     iso_title: DiscTitle | None = None
     source_media: ProbedMedia | None = None
 

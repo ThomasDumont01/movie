@@ -21,7 +21,7 @@ from movie.ffmpeg import (
 
 
 class MediaTagger:
-    """Remuxe un MKV, MP4 ou M4A en conservant ses flux utiles."""
+    """Remuxe un MKV, MP4 ou M4V en conservant ses flux utiles."""
 
     def __init__(self, executable: str | None = None) -> None:
         self.executable = executable
@@ -44,12 +44,10 @@ class MediaTagger:
                 artwork,
                 source_media,
             )
-        elif suffix == ".mp4":
+        elif suffix in {".mp4", ".m4v"}:
             command = self._mp4_command(source, metadata, artwork, source_media)
-        elif suffix == ".m4a":
-            command = self._m4a_command(source, metadata, artwork, source_media)
         else:  # pragma: no cover - le plan refuse le format avant l'exécution
-            raise MovieError("Les métadonnées sont prises en charge pour MKV, MP4 et M4A.")
+            raise MovieError("Les métadonnées sont prises en charge pour MKV, MP4 et M4V.")
 
         command.extend(("-progress", "pipe:1", "-nostats", "-y", str(destination)))
         return run_ffmpeg(
@@ -123,36 +121,6 @@ class MediaTagger:
                     f"-disposition:v:{video_count}",
                     "attached_pic",
                     f"-metadata:s:v:{video_count}",
-                    "title=Jaquette",
-                )
-            )
-        command.extend(metadata_arguments(metadata))
-        command.extend(("-movflags", "+faststart"))
-        return command
-
-    def _m4a_command(
-        self,
-        source: Path,
-        metadata: MovieMetadata,
-        artwork: tuple[Path, str] | None,
-        source_media: ProbedMedia,
-    ) -> list[str]:
-        command = self._base_command(source)
-        if artwork is not None:
-            poster, _mime_type = artwork
-            command.extend(("-i", str(poster)))
-        self._map_source_streams(command, source_media, artwork)
-        if artwork is not None:
-            command.extend(("-map", "1:v:0"))
-        command.extend(("-map_metadata", "0", "-map_chapters", "0", "-c", "copy"))
-        if artwork is not None:
-            command.extend(
-                (
-                    "-c:v:0",
-                    "mjpeg",
-                    "-disposition:v:0",
-                    "attached_pic",
-                    "-metadata:s:v:0",
                     "title=Jaquette",
                 )
             )

@@ -19,10 +19,10 @@ from movie.core.tag import TagService, build_tag_plan
 
 
 class TagPlanTests(TestCase):
-    def test_mkv_mp4_and_m4a_are_supported(self) -> None:
+    def test_mkv_mp4_and_m4v_are_supported(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
-            for suffix in (".mkv", ".mp4", ".m4a"):
+            for suffix in (".mkv", ".mp4", ".m4v"):
                 with self.subTest(suffix=suffix):
                     source = directory / f"film{suffix}"
                     source.write_bytes(b"source")
@@ -38,7 +38,7 @@ class TagPlanTests(TestCase):
             directory = Path(temporary_directory)
             unsupported = directory / "film.avi"
             unsupported.write_bytes(b"source")
-            with self.assertRaisesRegex(MovieError, "MKV, MP4 et M4A"):
+            with self.assertRaisesRegex(MovieError, "MKV, MP4 et M4V"):
                 build_tag_plan(unsupported, MovieMetadata(title="Film"))
 
             target = directory / "film.mkv"

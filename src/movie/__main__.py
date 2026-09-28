@@ -56,7 +56,6 @@ from movie.terminal import (
     _prompt_choice,
     _prompt_existing_file,
     _prompt_float,
-    _prompt_for_audio_track,
     _prompt_for_drive,
     _prompt_for_title,
     _prompt_genres,
@@ -69,7 +68,6 @@ from movie.terminal import (
     _prompt_required_text,
     _prompt_yes_no,
     _read_answer,
-    _stream_label,
 )
 
 
@@ -137,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
         "convert",
         help="convertit un ISO ou un fichier multimédia",
         description=(
-            "Convertit une image ISO ou un média local vers MKV, MP4 ou M4A, "
+            "Convertit une image ISO ou un média local vers MKV, MP4 ou M4V, "
             "puis contrôle le fichier produit."
         ),
     )
@@ -145,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
         "tag",
         help="ajoute ou corrige les informations d'un média",
         description=(
-            "Ajoute des métadonnées TMDB ou manuelles à un MKV, MP4 ou M4A, "
+            "Ajoute des métadonnées TMDB ou manuelles à un MKV, MP4 ou M4V, "
             "sans réencoder son contenu."
         ),
     )
@@ -261,7 +259,7 @@ def _config() -> int:
             choices={
                 "mkv": "copie fidèle de toutes les pistes",
                 "mp4": "vidéo H.264/AAC compatible",
-                "m4a": "une piste audio AAC ou ALAC",
+                "m4v": "vidéo H.264/AAC compatible Apple",
             },
             default=current.convert_format.value,
         )
@@ -497,32 +495,13 @@ def _convert() -> int:
 
     _print_step(2, 3, "Choix de la sortie")
     selected_format, selected_quality = _resolve_conversion_settings(config)
-    audio_streams = tuple(
-        stream for stream in source_streams if stream.kind == "audio"
-    )
-    if selected_format is OutputFormat.M4A and not audio_streams:
-        raise MovieError("La source ne contient aucune piste audio.")
-    audio_track = None
-    if selected_format is OutputFormat.M4A and iso_title is not None:
-        print(
-            "La piste audio sera choisie après l'extraction, "
-            "à partir du MKV réellement produit."
-        )
-    elif selected_format is OutputFormat.M4A:
-        if len(audio_streams) == 1:
-            audio_track = 0
-            print("Piste audio unique sélectionnée automatiquement.")
-        else:
-            _alert_user(config.alert_sound)
-            audio_track = _prompt_for_audio_track(audio_streams)
     if (
-        selected_format is OutputFormat.M4A
-        and audio_track is not None
-        and not 0 <= audio_track < len(audio_streams)
+        selected_format in {OutputFormat.MP4, OutputFormat.M4V}
+        and not any(stream.kind == "video" for stream in source_streams)
     ):
         raise MovieError(
-            f"La piste audio {audio_track} n'existe pas ; "
-            f"choix possibles : 0 à {len(audio_streams) - 1}."
+            f"La conversion {selected_format.value.upper()} nécessite "
+            "une piste vidéo."
         )
 
     required_bytes = conversion_required_bytes(
@@ -541,7 +520,6 @@ def _convert() -> int:
         selected_format,
         output_quality=selected_quality,
         output_directory=output_directory,
-        audio_track=audio_track,
         iso_title=iso_title,
         source_media=source_media,
     )
@@ -554,10 +532,6 @@ def _convert() -> int:
         "  Conversion  : "
         f"{_output_description(plan.output_format, plan.output_quality)}"
     )
-    if plan.audio_track is not None:
-        print(f"  Piste audio : [{plan.audio_track}] {_stream_label(audio_streams[plan.audio_track])}")
-    elif plan.output_format is OutputFormat.M4A:
-        print("  Piste audio : choix fiable après extraction de l'ISO")
     print(f"  Destination : {plan.output}")
 
     if not config.auto_run and not _prompt_yes_no("Lancer cette conversion ?"):
@@ -572,24 +546,7 @@ def _convert() -> int:
     )
     progress.start("Préparation de la source")
     try:
-        def select_extracted_audio(streams: tuple[Any, ...]) -> int:
-            progress.pause()
-            try:
-                _alert_user(config.alert_sound)
-                return _prompt_for_audio_track(streams)
-            finally:
-                progress.resume("Conversion du média")
-
-        result = service.execute(
-            plan,
-            on_progress=progress,
-            select_audio_track=(
-                select_extracted_audio
-                if plan.iso_title is not None
-                and plan.output_format is OutputFormat.M4A
-                else None
-            ),
-        )
+        result = service.execute(plan, on_progress=progress)
     except BaseException:
         progress.cancel()
         raise
@@ -612,10 +569,10 @@ def _tag() -> int:
     _print_header("Informations du média")
 
     _alert_user(config.alert_sound)
-    source = _prompt_existing_file("Fichier à renseigner (MKV, MP4 ou M4A)")
-    if source.suffix.casefold() not in {".mkv", ".mp4", ".m4a"}:
+    source = _prompt_existing_file("Fichier à renseigner (MKV, MP4 ou M4V)")
+    if source.suffix.casefold() not in {".mkv", ".mp4", ".m4v"}:
         raise MovieError(
-            "La commande tag accepte uniquement les fichiers MKV, MP4 et M4A."
+            "La commande tag accepte uniquement les fichiers MKV, MP4 et M4V."
         )
     mode = _prompt_choice(
         "Origine des informations",
@@ -839,7 +796,7 @@ def _resolve_conversion_settings(
                 choices={
                     "mkv": "toutes les pistes, sans réencodage",
                     "mp4": "vidéo compatible H.264/AAC",
-                    "m4a": "une piste audio AAC ou ALAC",
+                    "m4v": "vidéo H.264/AAC compatible Apple",
                 },
                 default=config.convert_format.value,
             )
@@ -879,10 +836,7 @@ def _prompt_conversion_quality(
         "max": OutputQuality.HIGH,
         "equilibre": OutputQuality.BALANCED,
         "compact": OutputQuality.COMPACT,
-        "sans-perte": OutputQuality.LOSSLESS,
     }
-    if output_format is OutputFormat.M4A:
-        choices["sans-perte"] = "audio ALAC sans perte supplémentaire"
     reverse = {quality: label for label, quality in mapping.items()}
     default_label = reverse.get(default, "equilibre")
     if default_label not in choices:
@@ -905,13 +859,9 @@ def _output_description(
         OutputQuality.HIGH: "haute qualité",
         OutputQuality.BALANCED: "équilibré",
         OutputQuality.COMPACT: "compact",
-        OutputQuality.LOSSLESS: "sans perte",
     }
     profile = quality_labels.get(output_quality, output_quality.value)
-    if output_format is OutputFormat.M4A:
-        codec = "ALAC" if output_quality is OutputQuality.LOSSLESS else "AAC"
-        return f"M4A · audio {codec} · profil {profile}"
-    return f"MP4 · H.264/AAC · profil {profile}"
+    return f"{output_format.value.upper()} · H.264/AAC · profil {profile}"
 
 
 def _service() -> RipService:
