@@ -4,6 +4,9 @@
 
 - `convert` demande désormais toujours explicitement le format de sortie, même
   avec `auto_run` ; la configuration reste la valeur proposée par défaut.
+- les entrées TS, MTS et M2TS forcent désormais le démultiplexeur MPEG-TS lorsque
+  nécessaire, afin de retrouver la vidéo des enregistrements dont l'en-tête est
+  mal détecté automatiquement par FFmpeg.
 
 ## 0.3.0 — 2026-09-29
 

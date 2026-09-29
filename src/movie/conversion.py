@@ -13,7 +13,7 @@ from movie.core.models import (
     ProgressUpdate,
 )
 from movie.ffmpeg import find_ffmpeg, run_ffmpeg
-from movie.formats import EncodingFamily, output_spec
+from movie.formats import EncodingFamily, input_format_hint, output_spec
 
 
 class MediaConverter:
@@ -71,14 +71,17 @@ class MediaConverter:
         )
 
     def _base_command(self, source: Path) -> list[str]:
-        return [
+        command = [
             self.executable or find_ffmpeg(),
             "-v",
             "error",
             "-nostdin",
-            "-i",
-            str(source),
         ]
+        hint = input_format_hint(source.suffix)
+        if hint is not None:
+            command.extend(("-f", hint))
+        command.extend(("-i", str(source)))
+        return command
 
     def _mkv_command(
         self,

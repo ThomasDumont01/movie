@@ -42,6 +42,43 @@ class MediaProbeTests(TestCase):
         self.assertEqual(artwork.kind, "attachment")
 
     @patch("movie.core.media.subprocess.run")
+    def test_m2ts_without_auto_detected_video_is_retried_as_mpegts(
+        self,
+        run: MagicMock,
+    ) -> None:
+        run.side_effect = (
+            CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=(
+                    '{"format":{"format_name":"mpeg"},'
+                    '"streams":[{"index":0,"codec_type":"audio",'
+                    '"codec_name":"ac3"}],"chapters":[]}'
+                ),
+                stderr="",
+            ),
+            CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=(
+                    '{"format":{"format_name":"mpegts"},'
+                    '"streams":[{"index":0,"codec_type":"video",'
+                    '"codec_name":"h264"},{"index":1,"codec_type":"audio",'
+                    '"codec_name":"eac3"}],"chapters":[]}'
+                ),
+                stderr="",
+            ),
+        )
+
+        media = MediaProbe("ffprobe-test").probe(Path("film.m2ts"))
+
+        self.assertEqual(media.stream_types, ("video", "audio"))
+        self.assertEqual(run.call_count, 2)
+        forced_command = run.call_args_list[1].args[0]
+        self.assertIn("-f", forced_command)
+        self.assertEqual(forced_command[forced_command.index("-f") + 1], "mpegts")
+
+    @patch("movie.core.media.subprocess.run")
     def test_probe_reports_ffprobe_failure(self, run: MagicMock) -> None:
         run.return_value = CompletedProcess(
             args=[], returncode=1, stdout="", stderr="fichier invalide"

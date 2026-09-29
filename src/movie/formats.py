@@ -7,6 +7,14 @@ from enum import StrEnum
 
 from movie.core.models import OutputFormat, OutputQuality
 
+TRANSPORT_STREAM_SUFFIXES = frozenset({".m2ts", ".mts", ".ts"})
+
+
+def input_format_hint(suffix: str) -> str | None:
+    """Force les conteneurs dont l'auto-détection FFmpeg est parfois ambiguë."""
+
+    return "mpegts" if suffix.casefold() in TRANSPORT_STREAM_SUFFIXES else None
+
 
 class EncodingFamily(StrEnum):
     """Familles de commandes FFmpeg maintenues par le convertisseur."""

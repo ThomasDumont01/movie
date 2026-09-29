@@ -218,6 +218,28 @@ class MediaTaggerTests(TestCase):
 
 class MediaConverterTests(TestCase):
     @patch("movie.ffmpeg.subprocess.run")
+    def test_m2ts_input_forces_the_mpegts_demuxer(self, run: MagicMock) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            destination = directory / "film.mp4"
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                destination.write_bytes(b"mp4")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaConverter("ffmpeg-test").convert(
+                directory / "source.m2ts",
+                destination,
+                output_format=OutputFormat.MP4,
+                quality=OutputQuality.BALANCED,
+            )
+
+            command = run.call_args.args[0]
+            input_index = command.index("-i")
+            self.assertEqual(command[input_index - 2 : input_index], ["-f", "mpegts"])
+
+    @patch("movie.ffmpeg.subprocess.run")
     def test_mp4_uses_h264_aac_and_selected_profile(self, run: MagicMock) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)

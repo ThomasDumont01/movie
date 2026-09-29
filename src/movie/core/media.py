@@ -15,6 +15,7 @@ from movie.core.models import (
     ProbedMedia,
     ToolUnavailableError,
 )
+from movie.formats import input_format_hint
 
 
 class MediaProbe:
@@ -24,10 +25,24 @@ class MediaProbe:
         self.executable = executable or _find_ffprobe()
 
     def probe(self, path: Path) -> ProbedMedia:
+        output = self._probe_output(path)
+        media = self._parse_probe(path, output)
+        hint = input_format_hint(path.suffix)
+        if hint is None or "video" in media.stream_types:
+            return media
+
+        try:
+            forced_output = self._probe_output(path, input_format=hint)
+            forced_media = self._parse_probe(path, forced_output)
+        except MovieError:
+            return media
+        return forced_media if "video" in forced_media.stream_types else media
+
+    def _probe_output(self, path: Path, *, input_format: str | None = None) -> str:
         result: subprocess.CompletedProcess[str] | None = None
         last_error: OSError | None = None
         for delay in (0.25, 0.75, 2.0, 4.0, None):
-            result, last_error = self._run_probe(path)
+            result, last_error = self._run_probe(path, input_format=input_format)
             if result is not None and (
                 result.returncode == 0 or not _is_transient_result(result)
             ):
@@ -45,25 +60,30 @@ class MediaProbe:
                 f"FFmpeg ne reconnaît pas ce fichier multimédia : {details[-1_000:]}"
             )
 
-        return self._parse_probe(path, result.stdout)
+        return result.stdout
 
     def _run_probe(
         self,
         path: Path,
+        *,
+        input_format: str | None,
     ) -> tuple[subprocess.CompletedProcess[str] | None, OSError | None]:
+        command = [self.executable, "-v", "error"]
+        if input_format is not None:
+            command.extend(("-f", input_format))
+        command.extend(
+            (
+                "-show_format",
+                "-show_streams",
+                "-show_chapters",
+                "-of",
+                "json",
+                str(path),
+            )
+        )
         try:
             result = subprocess.run(
-                [
-                    self.executable,
-                    "-v",
-                    "error",
-                    "-show_format",
-                    "-show_streams",
-                    "-show_chapters",
-                    "-of",
-                    "json",
-                    str(path),
-                ],
+                command,
                 check=False,
                 capture_output=True,
                 text=True,
