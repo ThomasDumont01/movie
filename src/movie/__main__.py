@@ -44,6 +44,8 @@ from movie.formats import (
     output_format_choices,
     output_spec,
     requires_video,
+    taggable_format_names,
+    taggable_suffixes,
 )
 from movie.metadata import MetadataClient, movie_search_url
 from movie.terminal import (
@@ -148,7 +150,8 @@ def build_parser() -> argparse.ArgumentParser:
         "tag",
         help="ajoute ou corrige les informations d'un média",
         description=(
-            "Ajoute des métadonnées TMDB ou manuelles à un MKV, MP4 ou M4V, "
+            "Ajoute des métadonnées TMDB ou manuelles et une jaquette à un "
+            f"fichier {taggable_format_names()}, "
             "sans réencoder son contenu."
         ),
     )
@@ -569,10 +572,11 @@ def _tag() -> int:
     _print_header("Informations du média")
 
     _alert_user(config.alert_sound)
-    source = _prompt_existing_file("Fichier à renseigner (MKV, MP4 ou M4V)")
-    if source.suffix.casefold() not in {".mkv", ".mp4", ".m4v"}:
+    source = _prompt_existing_file(f"Fichier à renseigner ({taggable_format_names()})")
+    if source.suffix.casefold() not in taggable_suffixes():
         raise MovieError(
-            "La commande tag accepte uniquement les fichiers MKV, MP4 et M4V."
+            "La commande tag accepte uniquement les fichiers "
+            f"{taggable_format_names()}."
         )
     mode = _prompt_choice(
         "Origine des informations",
@@ -594,7 +598,7 @@ def _tag() -> int:
     else:
         metadata = _manual_metadata(source)
 
-    plan = build_tag_plan(source, metadata, rename_for_media_center=True)
+    plan = build_tag_plan(source, metadata)
     _print_subheading("Récapitulatif")
     year = f" ({plan.metadata.year})" if plan.metadata.year else ""
     print(f"  Fichier      : {plan.source}")
@@ -632,13 +636,6 @@ def _tag() -> int:
     print("\n✓ Métadonnées écrites et vérifiées")
     print(f"  Fichier : {result.output}")
     print(f"  Titre   : {plan.metadata.title}{year}")
-    if plan.metadata.source_url:
-        print("  Lecteurs : nom compatible avec l'identification TMDB d'Infuse")
-    else:
-        print(
-            "  Infuse   : choisir « Aucun — utiliser les métadonnées intégrées » "
-            "si nécessaire"
-        )
     for warning in result.warnings:
         print(f"  ⚠ {warning}")
     return 0

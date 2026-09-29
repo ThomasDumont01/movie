@@ -507,8 +507,12 @@ class FfmpegIntegrationTests(TestCase):
             for source in (mkv, mp4, m4v):
                 with self.subTest(source=source.suffix):
                     result = service.execute(build_tag_plan(source, metadata))
-                    self.assertEqual(result.output, source.resolve())
-                    self.assertTrue(source.is_file())
+                    self.assertEqual(
+                        result.output.name,
+                        f"2026_archive_personnelle{source.suffix}",
+                    )
+                    self.assertFalse(source.exists())
+                    self.assertTrue(result.output.is_file())
                     self.assertIn("attachment", result.media.stream_types)
                     tags = {
                         key.casefold(): value for key, value in result.media.format_tags

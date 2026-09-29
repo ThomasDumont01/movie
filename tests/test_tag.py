@@ -17,6 +17,7 @@ from movie.core.models import (
     ProgressUpdate,
 )
 from movie.core.tag import TagService, _publish_tagged_file, build_tag_plan
+from movie.formats import taggable_format_names, taggable_suffixes
 
 
 class TagPlanTests(TestCase):
@@ -33,9 +34,9 @@ class TagPlanTests(TestCase):
                     )
                     self.assertEqual(plan.metadata.title, "Mon Film")
                     self.assertEqual(plan.metadata.genres, ("Drame",))
-                    self.assertEqual(plan.output, source.resolve())
+                    self.assertEqual(plan.output.name, f"mon_film{suffix}")
 
-    def test_media_center_name_contains_title_year_and_exact_tmdb_id(self) -> None:
+    def test_name_contains_year_and_normalized_title_without_tmdb_id(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "A1_t00.mkv"
             source.write_bytes(b"source")
@@ -43,20 +44,26 @@ class TagPlanTests(TestCase):
             plan = build_tag_plan(
                 source,
                 MovieMetadata(
-                    title="Star Wars : L'Ascension de Skywalker",
+                    title="Avengers: Endgame",
                     year=2019,
                     source_url=(
-                        "https://www.themoviedb.org/movie/"
-                        "181812-star-wars-the-rise-of-skywalker"
+                        "https://www.themoviedb.org/movie/299534-avengers-endgame"
                     ),
                 ),
-                rename_for_media_center=True,
             )
 
+            self.assertEqual(plan.output.name, "2019_avengers_endgame.mkv")
             self.assertEqual(
-                plan.output.name,
-                "Star Wars L'Ascension de Skywalker (2019) {tmdb-181812}.mkv",
+                plan.metadata.source_url,
+                "https://www.themoviedb.org/movie/299534-avengers-endgame",
             )
+
+    def test_supported_formats_have_metadata_and_artwork_guarantees(self) -> None:
+        self.assertEqual(
+            taggable_suffixes(),
+            frozenset({".mkv", ".mp4", ".m4v"}),
+        )
+        self.assertEqual(taggable_format_names(), "MKV, MP4, M4V")
 
     def test_manual_metadata_uses_safe_readable_filename(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -66,26 +73,24 @@ class TagPlanTests(TestCase):
             plan = build_tag_plan(
                 source,
                 MovieMetadata(title='Voyage : "Bretagne" / été', year=2024),
-                rename_for_media_center=True,
             )
 
-            self.assertEqual(plan.output.name, "Voyage Bretagne été (2024).m4v")
+            self.assertEqual(plan.output.name, "2024_voyage_bretagne_ete.m4v")
 
-    def test_existing_media_center_destination_is_refused(self) -> None:
+    def test_existing_renamed_destination_is_refused(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             source = directory / "film.mkv"
             source.write_bytes(b"source")
-            (directory / "Mon Film (2024).mkv").write_bytes(b"existing")
+            (directory / "2024_mon_film.mkv").write_bytes(b"existing")
 
             with self.assertRaisesRegex(OutputExistsError, "existe déjà"):
                 build_tag_plan(
                     source,
                     MovieMetadata(title="Mon Film", year=2024),
-                    rename_for_media_center=True,
                 )
 
-    def test_long_title_keeps_tmdb_identifier_within_filename_limit(self) -> None:
+    def test_long_title_keeps_year_within_filename_limit(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "film.mkv"
             source.write_bytes(b"source")
@@ -97,13 +102,13 @@ class TagPlanTests(TestCase):
                     year=2024,
                     source_url="https://www.themoviedb.org/movie/123-film",
                 ),
-                rename_for_media_center=True,
             )
 
             self.assertLessEqual(len(plan.output.name.encode("utf-8")), 240)
-            self.assertTrue(plan.output.name.endswith(" (2024) {tmdb-123}.mkv"))
+            self.assertTrue(plan.output.name.startswith("2024_"))
+            self.assertTrue(plan.output.name.endswith(".mkv"))
 
-    def test_untrusted_source_url_is_not_used_in_filename(self) -> None:
+    def test_source_url_is_never_used_in_filename(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "film.mkv"
             source.write_bytes(b"source")
@@ -114,17 +119,16 @@ class TagPlanTests(TestCase):
                     title="Mon Film",
                     source_url="https://example.com/movie/123-film",
                 ),
-                rename_for_media_center=True,
             )
 
-            self.assertEqual(plan.output.name, "Mon Film.mkv")
+            self.assertEqual(plan.output.name, "mon_film.mkv")
 
     def test_unsupported_file_symlink_and_empty_title_are_refused(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             unsupported = directory / "film.avi"
             unsupported.write_bytes(b"source")
-            with self.assertRaisesRegex(MovieError, "MKV, MP4 et M4V"):
+            with self.assertRaisesRegex(MovieError, "MKV, MP4, M4V"):
                 build_tag_plan(unsupported, MovieMetadata(title="Film"))
 
             target = directory / "film.mkv"
@@ -139,7 +143,7 @@ class TagPlanTests(TestCase):
 
 
 class TagExecutionTests(TestCase):
-    def test_verified_result_replaces_source_and_reports_progress(self) -> None:
+    def test_verified_result_renames_source_and_reports_progress(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "film.mkv"
             source.write_bytes(b"original")
@@ -152,9 +156,10 @@ class TagExecutionTests(TestCase):
                 _FakeTagger(),
             ).execute(plan, on_progress=updates.append)
 
-            self.assertEqual(source.read_bytes(), b"tagged")
-            self.assertEqual(result.output, source.resolve())
-            self.assertEqual(result.media.path, source.resolve())
+            self.assertFalse(source.exists())
+            self.assertEqual(result.output, plan.output)
+            self.assertEqual(result.output.read_bytes(), b"tagged")
+            self.assertEqual(result.media.path, plan.output)
             totals = [
                 update.total_fraction
                 for update in updates
@@ -164,16 +169,12 @@ class TagExecutionTests(TestCase):
             self.assertEqual(totals[-1], 1.0)
             self.assertEqual(list(source.parent.glob(".movie-tag-*")), [])
 
-    def test_verified_result_is_safely_published_under_media_center_name(self) -> None:
+    def test_verified_result_is_safely_published_under_normalized_name(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "A1_t00.mkv"
             source.write_bytes(b"original")
             metadata = _metadata()
-            plan = build_tag_plan(
-                source,
-                metadata,
-                rename_for_media_center=True,
-            )
+            plan = build_tag_plan(source, metadata)
 
             result = TagService(_TagProbe(metadata), _FakeTagger()).execute(plan)
 
@@ -187,7 +188,7 @@ class TagExecutionTests(TestCase):
         self, _replace: MagicMock
     ) -> None:
         with TemporaryDirectory() as temporary_directory:
-            source = Path(temporary_directory) / "film.mkv"
+            source = Path(temporary_directory) / "2024_mon_film.mkv"
             source.write_bytes(b"original")
             plan = build_tag_plan(source, _metadata())
 

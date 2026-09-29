@@ -204,8 +204,16 @@ pas modifiée.
 uv run movie tag
 ```
 
-`tag` fonctionne sur MKV, MP4 et M4V. Movie demande le fichier puis propose deux
-modes.
+`tag` fonctionne sur MKV, MP4 et M4V. Ce sont les conteneurs pour lesquels
+Movie peut écrire puis vérifier de manière fiable les informations **et** une
+jaquette intégrée. Les autres formats acceptés par `convert` ne proposent pas
+tous une représentation portable de la pochette ; `tag` les refuse donc au
+lieu de produire un résultat trompeur.
+
+Dans les trois formats acceptés, Movie dispose les informations dans les champs
+du conteneur (titre, date, description, genres et source) et intègre la
+jaquette. La vidéo, l'audio, les sous-titres et les chapitres sont conservés sans
+réencodage.
 
 ### Film officiel avec TMDB
 
@@ -218,16 +226,16 @@ https://www.themoviedb.org/movie/181812-star-wars-the-rise-of-skywalker
 
 Movie affiche le titre, l'année, les genres et le résumé avant confirmation. Il
 intègre ensuite le titre, l'année, le résumé, les genres, le lien TMDB et la
-jaquette. Il renomme aussi le média avec le titre, l'année et l'identifiant TMDB
-exact, par exemple :
+jaquette. Aucune clé API et aucun compte ne sont nécessaires.
+
+Le nom du fichier est normalisé en minuscules sous la forme
+`année_titre.extension`. Les espaces, accents et signes de ponctuation deviennent
+des séparateurs simples et l'identifiant TMDB reste dans les métadonnées plutôt
+que dans le nom. Par exemple :
 
 ```text
-Star Wars L'Ascension de Skywalker (2019) {tmdb-181812}.mkv
+2019_star_wars_l_ascension_de_skywalker.mkv
 ```
-
-Ce nom suit la convention documentée par Infuse et lui permet de retrouver sans
-ambiguïté sa propre fiche et sa propre jaquette en ligne. Aucune clé API et aucun
-compte ne sont nécessaires.
 
 ### Film personnel
 
@@ -239,23 +247,19 @@ Choisis `manuel`, puis renseigne :
 - les genres, facultatifs ;
 - une jaquette locale JPEG, PNG ou WebP, facultative.
 
-Le fichier reçoit un nom lisible construit à partir du titre et de l'année. Les
-champs laissés vides effacent les anciennes valeurs correspondantes, ce qui
-permet aussi de retirer une ancienne identification TMDB.
-
-Pour un film personnel, Infuse doit être configuré pour utiliser les données
-intégrées : clic droit sur le média, `Modifier les métadonnées`, puis
-`Aucun — utiliser les métadonnées intégrées`. Ce réglage peut aussi être activé
-pour un dossier entier. Movie rappelle cette information après le traitement.
+Le fichier reçoit le même nom normalisé. Par exemple, `La Clusaz Noël` daté de
+1974 devient `1974_la_clusaz_noel.mkv`. Sans année, le nom commence directement
+par le titre. Les champs laissés vides effacent les anciennes valeurs
+correspondantes, ce qui permet aussi de retirer une ancienne identification
+TMDB.
 
 ### Sécurité de `tag`
 
-La vidéo et l'audio ne sont jamais réencodés. Movie écrit une copie temporaire
-sur le même volume, vérifie toutes les pistes et toutes les métadonnées, publie
-le nom compatible sans écraser un fichier existant, puis retire l'ancien nom.
-En cas d'erreur ou d'interruption, l'original reste intact. Une nouvelle
-jaquette remplace l'ancienne sans supprimer les autres pièces jointes utiles du
-MKV.
+Movie écrit une copie temporaire sur le même volume, vérifie toutes les pistes,
+les informations et la jaquette, publie le nom normalisé sans écraser un fichier
+existant, puis retire l'ancien nom. En cas d'erreur ou d'interruption,
+l'original reste intact. Une nouvelle jaquette remplace l'ancienne sans
+supprimer les autres pièces jointes utiles du MKV.
 
 ## Configuration
 
@@ -345,7 +349,7 @@ uv run pyright
 
 État vérifié le 29 septembre 2026 pour la version 0.3.0 :
 
-- 160 tests et 85 sous-tests réussissent ;
+- 161 tests et 85 sous-tests réussissent ;
 - la couverture automatisée atteint 86 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;

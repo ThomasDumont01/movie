@@ -441,7 +441,7 @@ class CommandFlowTests(TestCase):
             plan = service_factory.return_value.execute.call_args.args[0]
             self.assertEqual(plan.metadata.title, "Vacances en Bretagne")
             self.assertEqual(plan.metadata.genres, ("Famille", "Voyage"))
-            self.assertEqual(plan.output.name, "Vacances en Bretagne (2024).mkv")
+            self.assertEqual(plan.output.name, "2024_vacances_en_bretagne.mkv")
             self.assertIn("Métadonnées écrites et vérifiées", output.getvalue())
 
 

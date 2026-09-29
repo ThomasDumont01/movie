@@ -14,7 +14,11 @@
   vérification centralisés dans un catalogue unique ;
 - vérification spécifique des codecs, pistes audio, langues, chapitres et
   durée pour chaque sortie ;
-- tests FFmpeg réels de chaque format en sortie puis comme nouvelle entrée.
+- tests FFmpeg réels de chaque format en sortie puis comme nouvelle entrée ;
+- nom des médias renseignés normalisé en `année_titre.extension`, sans
+  identifiant de service dans le nom de fichier ;
+- formats acceptés par `tag` issus du catalogue central et limités aux
+  conteneurs dont les informations et la jaquette sont vérifiables.
 
 ## 0.2.0 — 2026-09-28
 
@@ -26,8 +30,6 @@
 - écriture atomique des métadonnées étendue au M4V ;
 - estimation du temps restant fondée sur la vitesse récente ;
 - chemins glissés depuis Finder acceptés avec leurs espaces échappés ;
-- nommage automatique des médias renseignés pour Infuse et les autres lecteurs,
-  avec identifiant TMDB exact lorsqu'il est disponible ;
 - publication atomique compatible avec les partages réseau SMB qui refusent
   les liens physiques, notamment les dossiers Synology montés sur macOS.
 

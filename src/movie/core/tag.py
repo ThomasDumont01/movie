@@ -6,11 +6,11 @@ import os
 import re
 import stat
 import tempfile
+import unicodedata
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlsplit
 
 from movie.core.models import (
     MovieError,
@@ -34,11 +34,20 @@ from movie.core.workflow import (
     publish_without_overwrite,
     report_stage,
 )
+from movie.formats import taggable_format_names, taggable_suffixes
 
-_SUPPORTED_SUFFIXES = {".mkv", ".mp4", ".m4v"}
 _MAX_FILENAME_BYTES = 240
-_UNSAFE_FILENAME_CHARACTERS = re.compile(r'["\\/:|<>*?]+')
-_TMDB_MOVIE_PATH = re.compile(r"/movie/(\d+)(?:-[^/?#]+)?/?")
+_NON_FILENAME_CHARACTERS = re.compile(r"[^a-z0-9]+")
+_LATIN_TRANSLITERATION = str.maketrans(
+    {
+        "æ": "ae",
+        "ð": "d",
+        "ø": "o",
+        "þ": "th",
+        "ł": "l",
+        "œ": "oe",
+    }
+)
 
 
 class _ProbeBackend(Protocol):
@@ -60,8 +69,6 @@ class _TaggerBackend(Protocol):
 def build_tag_plan(
     source: Path | str,
     metadata: MovieMetadata,
-    *,
-    rename_for_media_center: bool = False,
 ) -> TagPlan:
     """Valide le média et les informations sans modifier le fichier."""
 
@@ -71,9 +78,10 @@ def build_tag_plan(
     source_path = unresolved.resolve()
     if not source_path.is_file():
         raise MovieError(f"Le fichier à enrichir est introuvable : {source_path}")
-    if source_path.suffix.casefold() not in _SUPPORTED_SUFFIXES:
+    if source_path.suffix.casefold() not in taggable_suffixes():
         raise MovieError(
-            "La commande tag accepte uniquement les fichiers MKV, MP4 et M4V."
+            "La commande tag accepte uniquement les fichiers "
+            f"{taggable_format_names()}."
         )
 
     title = " ".join(metadata.title.split())
@@ -97,15 +105,9 @@ def build_tag_plan(
             else None
         ),
     )
-    output = (
-        _media_center_path(source_path, normalized)
-        if rename_for_media_center
-        else source_path
-    )
+    output = _tagged_path(source_path, normalized)
     if output != source_path and is_occupied(output):
-        raise OutputExistsError(
-            f"Le nom recommandé pour les lecteurs multimédias existe déjà : {output}"
-        )
+        raise OutputExistsError(f"Le fichier renommé existe déjà : {output}")
     return TagPlan(source=source_path, output=output, metadata=normalized)
 
 
@@ -195,44 +197,31 @@ def _ensure_free_space(source: Path) -> None:
     )
 
 
-def _media_center_path(source: Path, metadata: MovieMetadata) -> Path:
-    """Construit un nom reconnu par Infuse et les serveurs multimédias."""
+def _tagged_path(source: Path, metadata: MovieMetadata) -> Path:
+    """Construit le nom stable ``année_titre_normalisé.extension``."""
 
-    title = _safe_filename_component(metadata.title)
-    year = f" ({metadata.year})" if metadata.year else ""
-    tmdb_id = _tmdb_movie_id(metadata.source_url)
-    identifier = f" {{tmdb-{tmdb_id}}}" if tmdb_id else ""
-    suffix = source.suffix
-    filename = _bounded_filename(title, f"{year}{identifier}", suffix)
+    title = _filename_slug(metadata.title)
+    prefix = f"{metadata.year}_" if metadata.year else ""
+    suffix = source.suffix.casefold()
+    filename = _bounded_filename(prefix, title, suffix)
     return source.with_name(filename)
 
 
-def _safe_filename_component(value: str) -> str:
-    cleaned = _UNSAFE_FILENAME_CHARACTERS.sub(" ", value)
-    cleaned = " ".join(cleaned.split()).strip(" .")
-    return cleaned or "media"
+def _filename_slug(value: str) -> str:
+    folded = value.casefold().translate(_LATIN_TRANSLITERATION)
+    ascii_value = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", folded)
+        if not unicodedata.combining(character) and character.isascii()
+    )
+    return _NON_FILENAME_CHARACTERS.sub("_", ascii_value).strip("_") or "media"
 
 
-def _bounded_filename(title: str, metadata_suffix: str, extension: str) -> str:
-    reserved = f"{metadata_suffix}{extension}"
+def _bounded_filename(prefix: str, title: str, extension: str) -> str:
+    reserved = f"{prefix}{extension}"
     available = _MAX_FILENAME_BYTES - len(reserved.encode("utf-8"))
-    encoded = title.encode("utf-8")
-    if len(encoded) > available:
-        title = encoded[:available].decode("utf-8", errors="ignore").rstrip(" .")
-    return f"{title or 'media'}{reserved}"
-
-
-def _tmdb_movie_id(source_url: str | None) -> str | None:
-    if not source_url:
-        return None
-    parsed = urlsplit(source_url)
-    if parsed.scheme != "https" or parsed.hostname not in {
-        "themoviedb.org",
-        "www.themoviedb.org",
-    }:
-        return None
-    match = _TMDB_MOVIE_PATH.fullmatch(parsed.path)
-    return match.group(1) if match else None
+    bounded_title = title[:available].rstrip("_") or "media"
+    return f"{prefix}{bounded_title}{extension}"
 
 
 def _publish_tagged_file(staged_file: Path, source: Path, output: Path) -> None:

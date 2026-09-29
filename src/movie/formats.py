@@ -31,6 +31,7 @@ class OutputFormatSpec:
     audio_codec: str | None
     preserves_chapters: bool
     preserves_audio_languages: bool
+    supports_tagging: bool = False
 
     @property
     def copies_source(self) -> bool:
@@ -67,6 +68,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         None,
         True,
         True,
+        supports_tagging=True,
     ),
     OutputFormat.MP4: OutputFormatSpec(
         "MP4",
@@ -76,6 +78,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         "aac",
         True,
         True,
+        supports_tagging=True,
     ),
     OutputFormat.M4V: OutputFormatSpec(
         "M4V",
@@ -85,6 +88,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         "aac",
         True,
         True,
+        supports_tagging=True,
     ),
     OutputFormat.MOV: OutputFormatSpec(
         "MOV",
@@ -189,6 +193,24 @@ def supported_output_values() -> str:
     """Liste textuelle stable des extensions produites."""
 
     return ", ".join(output_format.value for output_format in OUTPUT_FORMAT_SPECS)
+
+
+def taggable_suffixes() -> frozenset[str]:
+    """Extensions dont les informations et la jaquette sont vérifiables."""
+
+    return frozenset(
+        f".{output_format.value}"
+        for output_format, spec in OUTPUT_FORMAT_SPECS.items()
+        if spec.supports_tagging
+    )
+
+
+def taggable_format_names() -> str:
+    """Liste lisible des conteneurs acceptés par la commande ``tag``."""
+
+    return ", ".join(
+        spec.label for spec in OUTPUT_FORMAT_SPECS.values() if spec.supports_tagging
+    )
 
 
 def allowed_qualities(output_format: OutputFormat) -> tuple[OutputQuality, ...]:

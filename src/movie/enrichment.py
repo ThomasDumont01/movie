@@ -18,10 +18,11 @@ from movie.ffmpeg import (
     prepare_artwork,
     run_ffmpeg,
 )
+from movie.formats import taggable_format_names, taggable_suffixes
 
 
 class MediaTagger:
-    """Remuxe un MKV, MP4 ou M4V en conservant ses flux utiles."""
+    """Remuxe un média compatible en conservant ses flux utiles."""
 
     def __init__(self, executable: str | None = None) -> None:
         self.executable = executable
@@ -44,11 +45,12 @@ class MediaTagger:
                 artwork,
                 source_media,
             )
-        elif suffix in {".mp4", ".m4v"}:
+        elif suffix in taggable_suffixes() - {".mkv"}:
             command = self._mp4_command(source, metadata, artwork, source_media)
         else:  # pragma: no cover - le plan refuse le format avant l'exécution
             raise MovieError(
-                "Les métadonnées sont prises en charge pour MKV, MP4 et M4V."
+                "Les métadonnées et les jaquettes sont prises en charge pour "
+                f"{taggable_format_names()}."
             )
 
         command.extend(("-progress", "pipe:1", "-nostats", "-y", str(destination)))
