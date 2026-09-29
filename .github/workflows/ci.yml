@@ -20,10 +20,10 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
-      - name: Installer FFmpeg
+      - name: Installer les outils multimédias
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ffmpeg
+          sudo apt-get install --yes ffmpeg mkvtoolnix
 
       - name: Installer le projet
         run: uv sync --locked --group dev
