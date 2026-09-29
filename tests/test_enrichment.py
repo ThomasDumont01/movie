@@ -278,6 +278,49 @@ class MediaConverterTests(TestCase):
             self.assertEqual(command[input_index - 2 : input_index], ["-f", "mpegts"])
 
     @patch("movie.ffmpeg.subprocess.run")
+    def test_selected_audio_track_is_mapped_alone(self, run: MagicMock) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.m2ts"
+            destination = directory / "film.mp4"
+            source_media = ProbedMedia(
+                source,
+                120,
+                ("video", "audio", "audio", "audio"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "eac3"),
+                    MediaStream("audio", "qaa", "eac3"),
+                    MediaStream("audio", "fra", "eac3"),
+                ),
+            )
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                destination.write_bytes(b"mp4")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaConverter("ffmpeg-test").convert(
+                source,
+                destination,
+                output_format=OutputFormat.MP4,
+                quality=OutputQuality.BALANCED,
+                source_media=source_media,
+                audio_track_index=1,
+            )
+
+            command = run.call_args.args[0]
+            mapped_streams = [
+                command[index + 1]
+                for index, argument in enumerate(command[:-1])
+                if argument == "-map"
+            ]
+            self.assertEqual(mapped_streams, ["0:V:0", "0:a:1"])
+            self.assertIn("-disposition:a:0", command)
+            self.assertNotIn("0:a?", command)
+
+    @patch("movie.ffmpeg.subprocess.run")
     def test_mp4_uses_h264_aac_and_selected_profile(self, run: MagicMock) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)

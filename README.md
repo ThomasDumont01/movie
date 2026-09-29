@@ -185,6 +185,20 @@ sa qualité d'image reste strictement celle de la source et la conversion est bi
 plus rapide. Le profil choisi règle alors uniquement l'encodage audio en AAC.
 Une vidéo utilisant un autre codec est réencodée en H.264 selon le profil choisi.
 
+### Monter ou couper une vidéo sur Mac
+
+Pour iMovie comme pour DaVinci Resolve, choisis **MP4**. Si la source contient
+plusieurs pistes audio, Movie les présente clairement et demande laquelle doit
+être conservée : le résultat contient une seule piste audio, ce qui évite les
+interprétations ambiguës des logiciels de montage. Une vidéo H.264 reste copiée
+sans perte ; seule une piste E-AC-3, AC-3 ou autrement incompatible est convertie
+en AAC.
+
+Conserve le MKV original comme archive complète si tu veux garder toutes les
+langues et tous les sous-titres. Effectue le montage, exporte le fichier final,
+puis lance `uv run movie tag` sur ce résultat : un logiciel de montage peut
+supprimer les métadonnées et la jaquette lors de son propre export.
+
 Le profil équilibré en MP4 reste le meilleur choix par défaut. Un format ancien
 ne rend pas une vidéo meilleure ; AVI, MPG, ASF, WMV et FLV existent uniquement
 pour les appareils qui les imposent. MKV reste le seul choix qui copie directement
@@ -195,7 +209,11 @@ ne peuvent pas tous être conservés.
 
 Une ISO destinée au MKV est extraite puis publiée directement, sans remuxage
 inutile. Pour toute autre sortie, elle est d'abord extraite en MKV temporaire,
-vérifiée, puis convertie. Toutes les pistes audio sont conservées. Les pistes de
+vérifiée, puis convertie. Le MKV conserve toutes les pistes audio. Pour les autres
+sorties, lorsqu'il existe plusieurs pistes, l'interface demande toujours laquelle
+intégrer au fichier final ; la piste choisie est convertie dans le codec prévu par
+le format. Ce choix rend notamment les MP4 et M4V fiables dans les logiciels de
+montage, sans mélange ni piste audio imprévisible. Les pistes de
 sous-titres ne sont jamais abandonnées silencieusement : leur exclusion des
 sorties réencodées est annoncée, de même que la perte éventuelle de chapitres ou
 d'étiquettes de langue dans les anciens conteneurs. Choisis MKV pour tout
@@ -378,7 +396,7 @@ uv run pyright
 
 État vérifié le 29 septembre 2026 pour la version 0.3.0 :
 
-- 183 tests et 85 sous-tests réussissent ;
+- 199 tests et 85 sous-tests réussissent ;
 - la couverture automatisée atteint 86 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;

@@ -77,6 +77,9 @@ class MediaStream:
     codec: str | None = None
     stream_id: int | None = None
     is_artwork: bool = False
+    channels: int | None = None
+    channel_layout: str | None = None
+    title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +164,7 @@ class ConvertPlan:
     output_quality: OutputQuality
     iso_title: DiscTitle | None = None
     source_media: ProbedMedia | None = None
+    audio_track_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

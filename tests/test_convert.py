@@ -111,6 +111,38 @@ class ConvertPlanTests(TestCase):
             with self.assertRaisesRegex(MovieError, "M4V"):
                 build_convert_plan(source, "m4v", output_quality="source")
 
+    def test_audio_track_selection_is_validated_against_the_source(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.m2ts"
+            source.write_bytes(b"source")
+            media = ProbedMedia(
+                source,
+                120,
+                ("video", "audio", "audio"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "eac3"),
+                    MediaStream("audio", "qaa", "eac3"),
+                ),
+            )
+
+            plan = build_convert_plan(
+                source,
+                "mp4",
+                source_media=media,
+                audio_track_index=1,
+            )
+
+            self.assertEqual(plan.audio_track_index, 1)
+            with self.assertRaisesRegex(MovieError, "n'existe pas"):
+                build_convert_plan(
+                    source,
+                    "mp4",
+                    source_media=media,
+                    audio_track_index=2,
+                )
+
 
 class ConversionExecutionTests(TestCase):
     def test_an_existing_source_analysis_is_reused(self) -> None:
@@ -404,9 +436,17 @@ class _FakeConverter:
         quality: OutputQuality,
         duration_seconds: float | None = None,
         source_media: ProbedMedia | None = None,
+        audio_track_index: int | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path:
-        del source, output_format, quality, duration_seconds, source_media
+        del (
+            source,
+            output_format,
+            quality,
+            duration_seconds,
+            source_media,
+            audio_track_index,
+        )
         destination.write_bytes(b"converted")
         if on_progress is not None:
             on_progress(ProgressUpdate("Conversion", None, 1.0, 1.0))

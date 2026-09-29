@@ -75,6 +75,7 @@ class MediaConverter:
         quality: OutputQuality,
         duration_seconds: float | None = None,
         source_media: ProbedMedia | None = None,
+        audio_track_index: int | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path:
         spec = output_spec(output_format)
@@ -87,6 +88,7 @@ class MediaConverter:
                 output_format,
                 quality,
                 source_media,
+                audio_track_index,
             )
 
         command.extend(("-progress", "pipe:1", "-nostats", "-y", str(destination)))
@@ -134,6 +136,7 @@ class MediaConverter:
         output_format: OutputFormat,
         quality: OutputQuality,
         source_media: ProbedMedia | None,
+        audio_track_index: int | None,
     ) -> list[str]:
         spec = output_spec(output_format)
         if quality is OutputQuality.SOURCE:
@@ -141,12 +144,13 @@ class MediaConverter:
                 f"Le {spec.label} nécessite un profil high, balanced ou compact."
             )
         command = self._base_command(source)
+        audio_map = "0:a?" if audio_track_index is None else f"0:a:{audio_track_index}"
         command.extend(
             (
                 "-map",
                 "0:V:0",
                 "-map",
-                "0:a?",
+                audio_map,
                 "-map_metadata",
                 "0",
                 "-map_chapters",
@@ -192,6 +196,8 @@ class MediaConverter:
             self._add_legacy_options(command, spec.encoding, quality, spec.label)
         else:  # pragma: no cover - le catalogue est exhaustif et testé
             raise MovieError(f"Encodage non pris en charge : {spec.encoding}")
+        if audio_track_index is not None:
+            command.extend(("-disposition:a:0", "default"))
         return command
 
     def _add_h264_options(

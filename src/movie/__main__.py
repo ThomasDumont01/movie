@@ -23,6 +23,7 @@ from movie.core.media import MediaProbe
 from movie.core.models import (
     DiscTitle,
     Drive,
+    MediaStream,
     MovieError,
     MovieMetadata,
     OutputFormat,
@@ -522,6 +523,11 @@ def _convert() -> int:
         raise MovieError(
             f"La conversion {selected_format.value.upper()} nécessite une piste vidéo."
         )
+    audio_track_index = None
+    if not output_spec(selected_format).copies_source:
+        if sum(stream.kind == "audio" for stream in source_streams) > 1:
+            _alert_user(config.alert_sound)
+        audio_track_index = _prompt_audio_track(source_streams)
 
     required_bytes = conversion_required_bytes(
         source,
@@ -541,6 +547,7 @@ def _convert() -> int:
         output_directory=output_directory,
         iso_title=iso_title,
         source_media=source_media,
+        audio_track_index=audio_track_index,
     )
 
     _print_subheading("Récapitulatif")
@@ -553,6 +560,13 @@ def _convert() -> int:
         plan.source_media,
     )
     print(f"  Conversion  : {conversion_description}")
+    if plan.audio_track_index is not None:
+        audio_streams = tuple(
+            stream for stream in source_streams if stream.kind == "audio"
+        )
+        print(
+            f"  Audio       : {_audio_stream_label(audio_streams[plan.audio_track_index])}"
+        )
     print(f"  Destination : {plan.output}")
 
     if not config.auto_run and not _prompt_yes_no("Lancer cette conversion ?"):
@@ -886,6 +900,59 @@ def _prompt_conversion_quality(
         default=default_label,
     )
     return mapping[selected]
+
+
+def _prompt_audio_track(streams: Sequence[MediaStream]) -> int | None:
+    audio_streams = tuple(stream for stream in streams if stream.kind == "audio")
+    if not audio_streams:
+        return None
+    if len(audio_streams) == 1:
+        print(f"Piste audio conservée : {_audio_stream_label(audio_streams[0])}")
+        return 0
+
+    print("\nPiste audio du fichier final :")
+    for index, stream in enumerate(audio_streams, start=1):
+        default = " (par défaut)" if index == 1 else ""
+        print(f"  [{index}] {_audio_stream_label(stream)}{default}")
+    while True:
+        answer = _read_answer("Choix [1] : ")
+        try:
+            selected = int(answer or "1")
+        except ValueError:
+            selected = 0
+        if 1 <= selected <= len(audio_streams):
+            return selected - 1
+        print(f"Choix invalide. Saisis un nombre de 1 à {len(audio_streams)}.")
+
+
+def _audio_stream_label(stream: MediaStream) -> str:
+    language = {
+        "fra": "français",
+        "fre": "français",
+        "eng": "anglais",
+        "deu": "allemand",
+        "ger": "allemand",
+        "spa": "espagnol",
+        "ita": "italien",
+        "qaa": "langue non normalisée (qaa)",
+    }.get(stream.language or "", stream.language or "langue non précisée")
+    codec = {
+        "eac3": "E-AC-3",
+        "ac3": "AC-3",
+        "aac": "AAC",
+        "dts": "DTS",
+    }.get(stream.codec or "", (stream.codec or "codec inconnu").upper())
+    layout = stream.channel_layout
+    if layout == "stereo" or stream.channels == 2:
+        channel_description = "stéréo"
+    elif layout == "mono" or stream.channels == 1:
+        channel_description = "mono"
+    elif stream.channels:
+        channel_description = f"{stream.channels} canaux"
+    else:
+        channel_description = None
+    parts = (stream.title, language, codec, channel_description)
+    return " · ".join(part for part in parts if part)
 
 
 def _output_description(

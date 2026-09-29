@@ -119,6 +119,17 @@ class MediaProbe:
                     else None
                 ),
                 is_artwork=_is_artwork(stream),
+                channels=(
+                    int(stream["channels"])
+                    if isinstance(stream.get("channels"), int)
+                    else None
+                ),
+                channel_layout=(
+                    str(stream["channel_layout"])
+                    if stream.get("channel_layout")
+                    else None
+                ),
+                title=_stream_title(stream),
             )
             for stream in streams
             if isinstance(stream, dict) and stream.get("codec_type")
@@ -173,6 +184,17 @@ def _stream_language(stream: dict[object, object]) -> str | None:
         return None
     normalized = value.casefold().strip()
     return normalized if normalized not in {"", "und", "nolang"} else None
+
+
+def _stream_title(stream: dict[object, object]) -> str | None:
+    tags = stream.get("tags")
+    if not isinstance(tags, dict):
+        return None
+    value = tags.get("title") or tags.get("TITLE")
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split())
+    return normalized or None
 
 
 def _stream_kind(stream: dict[object, object]) -> str:

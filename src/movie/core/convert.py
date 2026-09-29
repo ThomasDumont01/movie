@@ -75,6 +75,7 @@ class _ConverterBackend(Protocol):
         quality: OutputQuality,
         duration_seconds: float | None = None,
         source_media: ProbedMedia | None = None,
+        audio_track_index: int | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path: ...
 
@@ -88,6 +89,7 @@ def build_convert_plan(
     output_directory: Path | str | None = None,
     iso_title: DiscTitle | None = None,
     source_media: ProbedMedia | None = None,
+    audio_track_index: int | None = None,
 ) -> ConvertPlan:
     """Valide les choix et calcule la destination sans rien créer."""
 
@@ -108,6 +110,19 @@ def build_convert_plan(
         raise MovieError("L'analyse d'un fichier ne peut pas être associée à une ISO.")
     if source_media is not None and source_media.path.resolve() != source_path:
         raise MovieError("L'analyse fournie ne correspond pas au fichier source.")
+    source_streams = (
+        iso_title.streams
+        if iso_title is not None
+        else source_media.streams
+        if source_media is not None
+        else ()
+    )
+    audio_streams = tuple(stream for stream in source_streams if stream.kind == "audio")
+    if audio_track_index is not None:
+        if selected_format is OutputFormat.MKV:
+            raise MovieError("Le MKV conserve automatiquement toutes les pistes audio.")
+        if audio_track_index < 0 or audio_track_index >= len(audio_streams):
+            raise MovieError("La piste audio sélectionnée n'existe pas dans la source.")
     destination = _destination_path(
         source_path,
         selected_format,
@@ -129,6 +144,7 @@ def build_convert_plan(
         output_quality=selected_quality,
         iso_title=iso_title,
         source_media=source_media,
+        audio_track_index=audio_track_index,
     )
 
 
@@ -251,6 +267,7 @@ class ConversionService:
                     quality=plan.output_quality,
                     duration_seconds=source_media.duration_seconds,
                     source_media=source_media,
+                    audio_track_index=plan.audio_track_index,
                     on_progress=phase_callback(
                         on_progress,
                         start=source_ready,

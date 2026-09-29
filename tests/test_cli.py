@@ -14,6 +14,7 @@ from movie.__main__ import (
     _doctor,
     _drives,
     _identify_movie,
+    _prompt_audio_track,
     _prompt_choice,
     _prompt_for_drive,
     _prompt_for_title,
@@ -95,6 +96,23 @@ class InteractivePromptTests(TestCase):
         self.assertEqual(selected, "2")
         self.assertIn("  2", output.getvalue())
         self.assertIn("(par défaut)", output.getvalue())
+
+    @patch("builtins.input", return_value="2")
+    def test_convert_asks_which_audio_track_to_keep(self, _input: object) -> None:
+        streams = (
+            MediaStream("video", codec="h264"),
+            MediaStream("audio", "fra", "eac3", channels=2, channel_layout="stereo"),
+            MediaStream("audio", "qaa", "eac3", channels=2, channel_layout="stereo"),
+            MediaStream("audio", "fra", "eac3", channels=2, channel_layout="stereo"),
+        )
+        output = StringIO()
+
+        with redirect_stdout(output):
+            selected = _prompt_audio_track(streams)
+
+        self.assertEqual(selected, 1)
+        self.assertIn("Piste audio du fichier final", output.getvalue())
+        self.assertIn("langue non normalisée (qaa)", output.getvalue())
 
     def test_single_drive_is_selected_without_question(self) -> None:
         drives = (Drive(4, 2, 1, 0, "Lecteur USB", "FILM", "/dev/disk4"),)

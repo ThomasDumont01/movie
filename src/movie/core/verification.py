@@ -150,6 +150,7 @@ def validate_conversion(
         source,
         output,
         spec=spec,
+        audio_track_index=plan.audio_track_index,
     )
 
 
@@ -265,27 +266,45 @@ def _validate_video_output(
     output: ProbedMedia,
     *,
     spec: OutputFormatSpec,
+    audio_track_index: int | None,
 ) -> tuple[str, ...]:
     label = spec.label
     videos = tuple(stream for stream in output.streams if stream.kind == "video")
     audios = tuple(stream for stream in output.streams if stream.kind == "audio")
     source_audios = tuple(stream for stream in source.streams if stream.kind == "audio")
+    expected_audios = source_audios
+    if audio_track_index is not None:
+        if audio_track_index >= len(source_audios):
+            raise MovieError(
+                "La piste audio sélectionnée n'existe plus dans la source."
+            )
+        expected_audios = (source_audios[audio_track_index],)
     if not videos or videos[0].codec != spec.video_codec:
         raise MovieError(
             f"Le {label} vérifié ne contient pas de vidéo {spec.video_codec}."
         )
-    if len(audios) < len(source_audios):
+    if len(audios) < len(expected_audios):
         raise MovieError(f"Le {label} a perdu une ou plusieurs pistes audio.")
+    if audio_track_index is not None and len(audios) != 1:
+        raise MovieError(
+            f"Le {label} devait contenir une seule piste audio pour le montage."
+        )
     if any(stream.codec != spec.audio_codec for stream in audios):
         raise MovieError(
             f"Toutes les pistes audio du {label} doivent être en {spec.audio_codec}."
         )
-    missing_languages = _missing_languages(source_audios, audios)
+    missing_languages = _missing_languages(expected_audios, audios)
     if missing_languages and spec.preserves_audio_languages:
         raise MovieError(f"Le {label} a perdu la langue d'une piste audio.")
     _validate_duration(source, output, label)
 
     warnings: list[str] = []
+    omitted_audio_count = len(source_audios) - len(expected_audios)
+    if omitted_audio_count:
+        warnings.append(
+            f"{omitted_audio_count} autre(s) piste(s) audio volontairement écartée(s) "
+            "pour produire un fichier de montage simple."
+        )
     if missing_languages:
         warnings.append(
             f"Le conteneur {label} ne conserve pas toujours les étiquettes de langue "

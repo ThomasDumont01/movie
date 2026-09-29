@@ -10,6 +10,10 @@
 - les entrées TS, MTS et M2TS forcent désormais le démultiplexeur MPEG-TS lorsque
   nécessaire, afin de retrouver la vidéo des enregistrements dont l'en-tête est
   mal détecté automatiquement par FFmpeg.
+- lorsqu'une sortie encodée est créée depuis une source multiaudio, `convert`
+  demande la piste à conserver, affiche sa langue, son codec et ses canaux, puis
+  vérifie que le résultat ne contient que cette piste ; le MKV continue de
+  préserver automatiquement toutes les pistes.
 
 ## 0.3.0 — 2026-09-29
 

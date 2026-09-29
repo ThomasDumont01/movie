@@ -21,7 +21,8 @@ class MediaProbeTests(TestCase):
                 '{"format":{"duration":"120.5","tags":{"title":"Film"}},'
                 '"streams":[{"index":0,"codec_type":"video","codec_name":"mpeg2video"},'
                 '{"index":1,"codec_type":"audio","codec_name":"ac3",'
-                '"tags":{"language":"fra"}},'
+                '"channels":2,"channel_layout":"stereo",'
+                '"tags":{"language":"fra","title":"Français"}},'
                 '{"index":2,"codec_type":"video","codec_name":"mjpeg",'
                 '"disposition":{"attached_pic":1}}],'
                 '"chapters":[{},{}]}'
@@ -38,6 +39,9 @@ class MediaProbeTests(TestCase):
         audio = next(stream for stream in media.streams if stream.kind == "audio")
         self.assertEqual(audio.language, "fra")
         self.assertEqual(audio.codec, "ac3")
+        self.assertEqual(audio.channels, 2)
+        self.assertEqual(audio.channel_layout, "stereo")
+        self.assertEqual(audio.title, "Français")
         artwork = next(stream for stream in media.streams if stream.is_artwork)
         self.assertEqual(artwork.kind, "attachment")
 
