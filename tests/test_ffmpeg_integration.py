@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from movie.conversion import MediaConverter
 from movie.core.media import MediaProbe
 from movie.core.models import (
+    ConvertPlan,
     DiscTitle,
     MediaStream,
     MovieMetadata,
@@ -22,7 +23,9 @@ from movie.core.models import (
 )
 from movie.core.rip import RipService
 from movie.core.tag import TagService, build_tag_plan
+from movie.core.verification import validate_conversion
 from movie.enrichment import MediaTagger
+from movie.formats import output_spec
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -255,12 +258,18 @@ class FfmpegIntegrationTests(TestCase):
             self.assertIn("attachment", media.stream_types)
             self.assertEqual(tags.get("title"), metadata.title)
 
-    def test_real_mkv_mp4_and_m4v_outputs_are_readable(self) -> None:
+    def test_every_supported_output_is_readable_and_reusable_as_input(self) -> None:
         assert FFMPEG is not None
         assert FFPROBE is not None
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             source = directory / "source.mkv"
+            chapters = directory / "chapters.txt"
+            chapters.write_text(
+                ";FFMETADATA1\n"
+                "[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1000\ntitle=Début\n",
+                encoding="utf-8",
+            )
             generated = subprocess.run(
                 [
                     FFMPEG,
@@ -274,11 +283,25 @@ class FfmpegIntegrationTests(TestCase):
                     "lavfi",
                     "-i",
                     "sine=frequency=440:duration=1",
+                    "-f",
+                    "ffmetadata",
+                    "-i",
+                    str(chapters),
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-map_metadata",
+                    "2",
+                    "-map_chapters",
+                    "2",
                     "-shortest",
                     "-c:v",
                     "ffv1",
                     "-c:a",
                     "pcm_s16le",
+                    "-metadata:s:a:0",
+                    "language=fra",
                     str(source),
                 ],
                 check=False,
@@ -287,28 +310,17 @@ class FfmpegIntegrationTests(TestCase):
             )
             self.assertEqual(generated.returncode, 0, generated.stderr)
             converter = MediaConverter(FFMPEG)
-            outputs = (
-                (
-                    directory / "copy.mkv",
-                    OutputFormat.MKV,
-                    OutputQuality.SOURCE,
-                    "pcm_s16le",
-                ),
-                (
-                    directory / "video.mp4",
-                    OutputFormat.MP4,
-                    OutputQuality.BALANCED,
-                    "aac",
-                ),
-                (
-                    directory / "video.m4v",
-                    OutputFormat.M4V,
-                    OutputQuality.BALANCED,
-                    "aac",
-                ),
-            )
-            for output, output_format, quality, expected_audio in outputs:
-                with self.subTest(output=output.name):
+            source_media = MediaProbe(FFPROBE).probe(source)
+            outputs: list[tuple[Path, OutputFormat]] = []
+            for output_format in OutputFormat:
+                with self.subTest(output=output_format.value):
+                    spec = output_spec(output_format)
+                    output = directory / f"video.{output_format.value}"
+                    quality = (
+                        OutputQuality.SOURCE
+                        if spec.copies_source
+                        else OutputQuality.BALANCED
+                    )
                     converter.convert(
                         source,
                         output,
@@ -316,18 +328,48 @@ class FfmpegIntegrationTests(TestCase):
                         quality=quality,
                     )
                     media = MediaProbe(FFPROBE).probe(output)
-                    codecs = {
-                        stream.codec
-                        for stream in media.streams
-                        if stream.kind == "audio"
-                    }
-                    self.assertIn(expected_audio, codecs)
-                    if output_format is not OutputFormat.MKV:
+                    validate_conversion(
+                        ConvertPlan(
+                            source,
+                            output,
+                            output_format,
+                            quality,
+                            source_media=source_media,
+                        ),
+                        source_media,
+                        media,
+                    )
+                    if spec.copies_source:
                         self.assertIn(
-                            ("video", "h264"),
+                            ("audio", "pcm_s16le"),
+                            {(stream.kind, stream.codec) for stream in media.streams},
+                        )
+                    else:
+                        self.assertIn(
+                            ("video", spec.video_codec),
+                            {(stream.kind, stream.codec) for stream in media.streams},
+                        )
+                        self.assertIn(
+                            ("audio", spec.audio_codec),
                             {(stream.kind, stream.codec) for stream in media.streams},
                         )
                     self.assertGreater(output.stat().st_size, 0)
+                    outputs.append((output, output_format))
+
+            for index, (input_path, input_format) in enumerate(outputs):
+                with self.subTest(input=input_format.value):
+                    round_trip = directory / f"round-trip-{index}.mp4"
+                    converter.convert(
+                        input_path,
+                        round_trip,
+                        output_format=OutputFormat.MP4,
+                        quality=OutputQuality.COMPACT,
+                    )
+                    media = MediaProbe(FFPROBE).probe(round_trip)
+                    self.assertIn(
+                        ("video", "h264"),
+                        {(stream.kind, stream.codec) for stream in media.streams},
+                    )
 
     @patch("movie.enrichment.prepare_artwork")
     def test_real_m4v_tagging_preserves_media_and_adds_cover(

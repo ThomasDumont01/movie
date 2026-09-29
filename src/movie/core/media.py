@@ -44,7 +44,7 @@ class MediaProbe:
         if result.returncode != 0:
             details = (result.stderr or result.stdout).strip()
             raise MovieError(
-                f"ffprobe ne peut pas lire le média temporaire : {details[-1_000:]}"
+                f"FFmpeg ne reconnaît pas ce fichier multimédia : {details[-1_000:]}"
             )
         try:
             payload = json.loads(result.stdout)
@@ -63,9 +63,7 @@ class MediaProbe:
                 kind=_stream_kind(stream),
                 language=_stream_language(stream),
                 codec=(
-                    str(stream.get("codec_name"))
-                    if stream.get("codec_name")
-                    else None
+                    str(stream.get("codec_name")) if stream.get("codec_name") else None
                 ),
                 stream_id=(
                     int(stream["index"])
@@ -79,12 +77,7 @@ class MediaProbe:
         )
         raw_tags = payload.get("format", {}).get("tags", {})
         format_tags = (
-            tuple(
-                sorted(
-                    (str(key), str(value))
-                    for key, value in raw_tags.items()
-                )
-            )
+            tuple(sorted((str(key), str(value)) for key, value in raw_tags.items()))
             if isinstance(raw_tags, dict)
             else ()
         )

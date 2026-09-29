@@ -1,3 +1,3 @@
-"""Movie — numérisation DVD et conversion multimédia sûres."""
+"""Movie — numérisation de disques vidéo et conversion multimédia sûres."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

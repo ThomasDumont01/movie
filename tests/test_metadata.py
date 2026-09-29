@@ -13,7 +13,7 @@ from movie.metadata import (
     parse_movie_page,
 )
 
-MOVIE_PAGE = '''
+MOVIE_PAGE = """
 <html><head>
 <meta property="og:title" content="Titre de secours — IMDb">
 <script type="application/ld+json">
@@ -28,14 +28,12 @@ MOVIE_PAGE = '''
 }
 </script>
 </head></html>
-'''
+"""
 
 
 class MetadataParserTests(TestCase):
     def test_extracts_structured_movie_metadata(self) -> None:
-        metadata = parse_movie_page(
-            MOVIE_PAGE, "https://www.imdb.com/title/tt0000001/"
-        )
+        metadata = parse_movie_page(MOVIE_PAGE, "https://www.imdb.com/title/tt0000001/")
 
         self.assertEqual(metadata.title, "Mon Film")
         self.assertEqual(metadata.year, 2019)
@@ -62,12 +60,12 @@ class MetadataParserTests(TestCase):
         )
 
     def test_tmdb_cdata_and_release_event_are_supported(self) -> None:
-        page = '''
+        page = """
         <script type="application/ld+json">/* <![CDATA[ */
         {"@type":"Movie","name":"Film TMDB","genre":["Drame"],
          "releasedEvent":[{"startDate":"2021-05-03"}]}
         /* ]]> */</script>
-        '''
+        """
 
         metadata = parse_movie_page(
             page,
@@ -170,9 +168,7 @@ class MetadataClientTests(TestCase):
             MetadataClient().fetch("https://www.themoviedb.org/movie/1-film")
 
 
-def _response(
-    *, final_url: str, content_type: str, content: bytes
-) -> MagicMock:
+def _response(*, final_url: str, content_type: str, content: bytes) -> MagicMock:
     response = MagicMock()
     response.geturl.return_value = final_url
     response.headers.get_content_type.return_value = content_type

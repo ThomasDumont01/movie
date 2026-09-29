@@ -120,7 +120,7 @@ class MakeMkvClient:
         drive_index: int,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> DiscScan:
-        """Analyse titres et pistes du DVD indiqué, sans le modifier."""
+        """Analyse les titres du disque vidéo indiqué, sans le modifier."""
 
         return self._scan_source(
             f"disc:{drive_index}",
@@ -186,11 +186,7 @@ class MakeMkvClient:
                 name="Image ISO",
                 disc_label=(
                     next(
-                        (
-                            item.disc_label
-                            for item in report.drives
-                            if item.disc_label
-                        ),
+                        (item.disc_label for item in report.drives if item.disc_label),
                         None,
                     )
                     or (iso_path.stem if iso_path is not None else None)
@@ -215,9 +211,7 @@ class MakeMkvClient:
                     "est lisible et qu'aucune autre application ne l'utilise."
                 )
             details = (
-                f" Détail MakeMKV : {report.warnings[-1]}"
-                if report.warnings
-                else ""
+                f" Détail MakeMKV : {report.warnings[-1]}" if report.warnings else ""
             )
             raise DiscError(
                 f"Aucun titre exploitable n'a été trouvé dans {source_name}." + details

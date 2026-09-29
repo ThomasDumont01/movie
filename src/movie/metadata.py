@@ -52,7 +52,9 @@ class MetadataClient:
         except MovieError:
             raise
         except OSError as error:
-            raise MovieError(f"Impossible de lire la fiche du film : {error}") from error
+            raise MovieError(
+                f"Impossible de lire la fiche du film : {error}"
+            ) from error
 
         return parse_movie_page(raw.decode(charset, errors="replace"), final_url)
 

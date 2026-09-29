@@ -56,7 +56,9 @@ class RipPlanTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual([title.title_id for title in main_title_candidates(scan)], [0, 1])
+        self.assertEqual(
+            [title.title_id for title in main_title_candidates(scan)], [0, 1]
+        )
         with self.assertRaises(DiscError):
             select_main_title(scan)
 
@@ -100,16 +102,21 @@ class RipPlanTests(unittest.TestCase):
             with self.assertRaises(OutputExistsError):
                 build_rip_plan(_scan(), destination)
 
-    def test_non_dvd_is_refused_before_writing(self) -> None:
+    def test_every_video_disc_opened_by_makemkv_is_accepted(self) -> None:
         with TemporaryDirectory() as temporary_directory:
-            scan = DiscScan(
-                drive=_scan().drive,
-                disc_type="Blu-ray disc",
-                titles=_scan().titles,
-            )
-
-            with self.assertRaises(DiscError):
-                build_rip_plan(scan, Path(temporary_directory) / "Films")
+            for disc_type in (
+                "DVD disc",
+                "Blu-ray disc",
+                "UHD Blu-ray disc",
+                None,
+            ):
+                with self.subTest(disc_type=disc_type):
+                    scan = replace(_scan(), disc_type=disc_type)
+                    plan = build_rip_plan(
+                        scan,
+                        Path(temporary_directory) / "Films",
+                    )
+                    self.assertEqual(plan.title.title_id, 1)
 
 
 class RipExecutionTests(unittest.TestCase):
@@ -158,9 +165,7 @@ class RipExecutionTests(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             plan = build_rip_plan(_scan(), temporary_directory)
 
-            result = RipService(
-                _FakeMakeMkv(), _ChapterWarningProbe()
-            ).execute(plan)
+            result = RipService(_FakeMakeMkv(), _ChapterWarningProbe()).execute(plan)
 
             self.assertEqual(len(result.warnings), 1)
             self.assertIn("19 chapitre", result.warnings[0])
@@ -209,6 +214,7 @@ class RipExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "Impossible de préparer le dossier"):
             RipService(_FakeMakeMkv(), _ValidProbe()).execute(plan)
 
+
 class MediaValidationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.title = DiscTitle(
@@ -249,7 +255,7 @@ class MediaValidationTests(unittest.TestCase):
         self.assertIn("sous-titre", warnings[0])
         self.assertIn("piste vide", warnings[0])
 
-    def test_audio_announced_by_dvd_is_required(self) -> None:
+    def test_audio_announced_by_the_source_is_required(self) -> None:
         media = ProbedMedia(
             Path("x"),
             120,
@@ -275,7 +281,9 @@ class MediaValidationTests(unittest.TestCase):
 
         self.assertIn("sous-titre", warnings[0])
 
-    def test_language_tag_difference_is_reported_without_deleting_the_movie(self) -> None:
+    def test_language_tag_difference_is_reported_without_deleting_the_movie(
+        self,
+    ) -> None:
         media = ProbedMedia(
             Path("x"),
             120,
@@ -299,9 +307,7 @@ class MediaValidationTests(unittest.TestCase):
         warnings = _validate_media(self.title, too_few_chapters)
         self.assertIn("1 chapitre", "\n".join(warnings))
 
-        wrong_duration = ProbedMedia(
-            Path("x"), 150, ("video", "audio", "subtitle"), 2
-        )
+        wrong_duration = ProbedMedia(Path("x"), 150, ("video", "audio", "subtitle"), 2)
         with self.assertRaisesRegex(MovieError, "durée"):
             _validate_media(self.title, wrong_duration)
 
@@ -311,7 +317,7 @@ class MediaValidationTests(unittest.TestCase):
             chapter_count=2,
         )
         warnings = _validate_media(self.title, slightly_different)
-        self.assertIn("navigation du DVD", "\n".join(warnings))
+        self.assertIn("navigation du support", "\n".join(warnings))
 
         short_title = replace(self.title, duration_seconds=15)
         truncated_short_media = replace(
@@ -350,6 +356,7 @@ class MediaValidationTests(unittest.TestCase):
             (staging / "autre.mkv").write_bytes(b"mkv")
             with self.assertRaisesRegex(MovieError, "2 fichier"):
                 _single_mkv(staging)
+
 
 class _FakeMakeMkv:
     def drives(self) -> tuple[Drive, ...]:

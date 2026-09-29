@@ -40,6 +40,11 @@ from movie.core.storage import (
 )
 from movie.core.tag import TagService, build_tag_plan
 from movie.enrichment import MediaTagger
+from movie.formats import (
+    output_format_choices,
+    output_spec,
+    requires_video,
+)
 from movie.metadata import MetadataClient, movie_search_url
 from movie.terminal import (
     _alert_user,
@@ -120,13 +125,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser(
         "scan",
-        help="inspecte le DVD sans créer de fichier",
-        description="Analyse le DVD inséré et présente tous ses titres.",
+        help="inspecte le disque vidéo sans créer de fichier",
+        description="Analyse le DVD, Blu-ray ou UHD inséré et présente ses titres.",
     )
 
     commands.add_parser(
         "rip",
-        help="archive le film du DVD en MKV",
+        help="archive un film du disque en MKV",
         description=(
             "Guide la sélection du film, crée un MKV fidèle, puis vérifie le résultat."
         ),
@@ -135,8 +140,8 @@ def build_parser() -> argparse.ArgumentParser:
         "convert",
         help="convertit un ISO ou un fichier multimédia",
         description=(
-            "Convertit une image ISO ou un média local vers MKV, MP4 ou M4V, "
-            "puis contrôle le fichier produit."
+            "Convertit une image ISO ou tout média lisible par FFmpeg vers un "
+            "format vidéo compatible, puis contrôle le fichier produit."
         ),
     )
     commands.add_parser(
@@ -172,7 +177,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"✗ {error}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        print("\nOpération interrompue. Aucun résultat incomplet n'a été publié.", file=sys.stderr)
+        print(
+            "\nOpération interrompue. Aucun résultat incomplet n'a été publié.",
+            file=sys.stderr,
+        )
         return 130
 
     parser.print_help()
@@ -256,15 +264,11 @@ def _config() -> int:
     convert_format = OutputFormat(
         _prompt_choice(
             "Format de conversion par défaut",
-            choices={
-                "mkv": "copie fidèle de toutes les pistes",
-                "mp4": "vidéo H.264/AAC compatible",
-                "m4v": "vidéo H.264/AAC compatible Apple",
-            },
+            choices=output_format_choices(),
             default=current.convert_format.value,
         )
     )
-    if convert_format is OutputFormat.MKV:
+    if output_spec(convert_format).copies_source:
         convert_quality = OutputQuality.SOURCE
     else:
         configured_quality = (
@@ -299,7 +303,7 @@ def _config() -> int:
 def _scan() -> int:
     config = load_config()
     client = MakeMkvClient()
-    _print_header("Analyse du DVD")
+    _print_header("Analyse du disque")
     selected_drive, drives = _resolve_drive_for_operation(
         client,
         requested=None,
@@ -346,7 +350,7 @@ def _scan() -> int:
         print(f"⚠ {warning}")
     print(
         "\nℹ Cette commande est uniquement informative. "
-        "La commande rip refera automatiquement sa propre analyse du DVD."
+        "La commande rip refera automatiquement sa propre analyse du disque."
     )
     return 0
 
@@ -354,7 +358,7 @@ def _scan() -> int:
 def _rip() -> int:
     config = load_config()
     service = _service()
-    _print_header("Numérisation d'un DVD")
+    _print_header("Numérisation d'un disque")
     selected_drive, drives = _resolve_drive_for_operation(
         service.makemkv,
         requested=None,
@@ -363,7 +367,7 @@ def _rip() -> int:
     )
     if drives:
         _print_selected_drive(drives, selected_drive)
-    _print_step(1, 3, "Analyse du DVD")
+    _print_step(1, 3, "Analyse du disque")
     print("Analyse en cours…")
     scan_progress = _ProgressRenderer(
         operation_label="Analyse du disque",
@@ -379,8 +383,8 @@ def _rip() -> int:
     if not drives:
         _print_selected_drive((scan.drive,), selected_drive)
     print(
-        f"DVD reconnu : {scan.drive.disc_label or 'sans nom'} "
-        f"· {len(scan.titles)} titre(s)"
+        f"Support reconnu : {scan.disc_type or 'type non identifié'} "
+        f"· {scan.drive.disc_label or 'sans nom'} · {len(scan.titles)} titre(s)"
     )
     _print_step(2, 3, "Choix du film")
     candidates = main_title_candidates(scan)
@@ -406,7 +410,7 @@ def _rip() -> int:
     _print_subheading("Récapitulatif")
     print(f"  Titre       : {_format_title(plan.title)}")
     if plan.title.size_bytes:
-        print(f"  Taille DVD  : {_format_file_size(plan.title.size_bytes)}")
+        print(f"  Taille      : {_format_file_size(plan.title.size_bytes)}")
     print("  Sortie      : MKV · qualité source · toutes les pistes")
     print(f"  Destination : {plan.output}")
     if not config.auto_run and not _prompt_yes_no("Lancer cette numérisation ?"):
@@ -416,7 +420,7 @@ def _rip() -> int:
     _print_step(3, 3, "Création et vérification")
     print("Traitement en cours…")
     progress = _ProgressRenderer(
-        operation_label="Numérisation du DVD",
+        operation_label="Numérisation du disque",
         threshold_seconds=config.progress_delay_seconds,
     )
     progress.start("Préparation de l'extraction")
@@ -443,7 +447,7 @@ def _convert() -> int:
     _print_header("Conversion d'un média")
 
     _alert_user(config.alert_sound)
-    source = _prompt_path("Fichier source (ISO, MKV, MP4…)")
+    source = _prompt_path("Fichier source (ISO ou média lisible par FFmpeg)")
     source = source.expanduser().resolve()
     if not source.is_file():
         raise MovieError(f"Le fichier source est introuvable : {source}")
@@ -481,9 +485,7 @@ def _convert() -> int:
         print(f"Source reconnue : image ISO · {_format_title(iso_title)}")
     else:
         source_media = service.probe.probe(source)
-        if not any(
-            kind in {"video", "audio"} for kind in source_media.stream_types
-        ):
+        if not any(kind in {"video", "audio"} for kind in source_media.stream_types):
             raise MovieError(
                 "La source ne contient aucune piste audio ou vidéo exploitable."
             )
@@ -495,13 +497,11 @@ def _convert() -> int:
 
     _print_step(2, 3, "Choix de la sortie")
     selected_format, selected_quality = _resolve_conversion_settings(config)
-    if (
-        selected_format in {OutputFormat.MP4, OutputFormat.M4V}
-        and not any(stream.kind == "video" for stream in source_streams)
+    if requires_video(selected_format) and not any(
+        stream.kind == "video" for stream in source_streams
     ):
         raise MovieError(
-            f"La conversion {selected_format.value.upper()} nécessite "
-            "une piste vidéo."
+            f"La conversion {selected_format.value.upper()} nécessite une piste vidéo."
         )
 
     required_bytes = conversion_required_bytes(
@@ -601,10 +601,14 @@ def _tag() -> int:
     if plan.output != plan.source:
         print(f"  Nouveau nom  : {plan.output.name}")
     print(f"  Titre        : {plan.metadata.title}{year}")
-    print(f"  Informations : {'TMDB' if plan.metadata.source_url else 'saisie manuelle'}")
+    print(
+        f"  Informations : {'TMDB' if plan.metadata.source_url else 'saisie manuelle'}"
+    )
     print(f"  Jaquette     : {'oui' if plan.metadata.has_artwork else 'non'}")
     print("  Traitement   : copie des pistes, sans réencodage")
-    print("  Sécurité     : l'original reste intact tant que la vérification n'est pas finie")
+    print(
+        "  Sécurité     : l'original reste intact tant que la vérification n'est pas finie"
+    )
 
     if not config.auto_run and not _prompt_yes_no(
         "Écrire ces informations dans le fichier ?"
@@ -647,9 +651,7 @@ def _manual_metadata(source: Path) -> MovieMetadata:
     year = _prompt_optional_year()
     summary = _prompt_optional_text("Description")
     genres = _prompt_genres()
-    poster_path = _prompt_optional_existing_file(
-        "Jaquette locale JPEG, PNG ou WebP"
-    )
+    poster_path = _prompt_optional_existing_file("Jaquette locale JPEG, PNG ou WebP")
     return MovieMetadata(
         title=title,
         year=year,
@@ -802,16 +804,12 @@ def _resolve_conversion_settings(
         selected_format = OutputFormat(
             _prompt_choice(
                 "Format de conversion",
-                choices={
-                    "mkv": "toutes les pistes, sans réencodage",
-                    "mp4": "vidéo compatible H.264/AAC",
-                    "m4v": "vidéo H.264/AAC compatible Apple",
-                },
+                choices=output_format_choices(),
                 default=config.convert_format.value,
             )
         )
 
-    if selected_format is OutputFormat.MKV:
+    if output_spec(selected_format).copies_source:
         selected_quality = OutputQuality.SOURCE
     elif config.auto_run:
         selected_quality = (
@@ -862,7 +860,8 @@ def _output_description(
     output_format: OutputFormat,
     output_quality: OutputQuality,
 ) -> str:
-    if output_format is OutputFormat.MKV:
+    spec = output_spec(output_format)
+    if spec.copies_source:
         return "MKV · qualité source · toutes les pistes"
     quality_labels = {
         OutputQuality.HIGH: "haute qualité",
@@ -870,7 +869,7 @@ def _output_description(
         OutputQuality.COMPACT: "compact",
     }
     profile = quality_labels.get(output_quality, output_quality.value)
-    return f"{output_format.value.upper()} · H.264/AAC · profil {profile}"
+    return f"{spec.label} · {spec.codec_description} · profil {profile}"
 
 
 def _service() -> RipService:

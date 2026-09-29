@@ -35,9 +35,7 @@ class MediaTaggerTests(TestCase):
         self.assertEqual(_progress_fraction("progress", "end", None), 1.0)
 
     @patch("movie.ffmpeg.subprocess.run")
-    def test_enrichment_copies_streams_and_sets_metadata(
-        self, run: MagicMock
-    ) -> None:
+    def test_enrichment_copies_streams_and_sets_metadata(self, run: MagicMock) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             source = directory / "source.mkv"

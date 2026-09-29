@@ -14,6 +14,7 @@ from movie.__main__ import (
     _doctor,
     _drives,
     _identify_movie,
+    _prompt_choice,
     _prompt_for_drive,
     _prompt_for_title,
     _prompt_optional_path,
@@ -62,6 +63,21 @@ class TitlePromptTests(TestCase):
 
 
 class InteractivePromptTests(TestCase):
+    @patch("builtins.input", return_value="")
+    def test_long_choice_list_is_rendered_on_separate_lines(
+        self,
+        _input: object,
+    ) -> None:
+        output = StringIO()
+        choices = {str(index): f"Format {index}" for index in range(5)}
+
+        with redirect_stdout(output):
+            selected = _prompt_choice("Format", choices=choices, default="2")
+
+        self.assertEqual(selected, "2")
+        self.assertIn("  2", output.getvalue())
+        self.assertIn("(par défaut)", output.getvalue())
+
     def test_single_drive_is_selected_without_question(self) -> None:
         drives = (Drive(4, 2, 1, 0, "Lecteur USB", "FILM", "/dev/disk4"),)
         with patch("builtins.input") as prompt:
@@ -153,7 +169,7 @@ class CommandFlowTests(TestCase):
 
         self.assertEqual(result, 0)
         self.assertIn("uv run movie rip", output.getvalue())
-        self.assertIn("inspecte le DVD sans créer de fichier", output.getvalue())
+        self.assertIn("inspecte le disque vidéo", output.getvalue())
 
     @patch("movie.__main__._doctor", side_effect=MovieError("outil cassé"))
     def test_expected_error_is_short_and_has_exit_code_two(
@@ -239,7 +255,7 @@ class CommandFlowTests(TestCase):
 
         rendered = output.getvalue()
         self.assertEqual(result, 0)
-        self.assertIn("Movie · Analyse du DVD", rendered)
+        self.assertIn("Movie · Analyse du disque", rendered)
         self.assertIn("✓ Analyse du disque terminée", rendered)
         self.assertIn("Contenu détecté", rendered)
         self.assertIn("uniquement informative", rendered)
@@ -250,7 +266,7 @@ class CommandFlowTests(TestCase):
         self, service_factory: MagicMock, load: MagicMock
     ) -> None:
         with TemporaryDirectory() as temporary_directory:
-            scan = _disc_scan()
+            scan = _disc_scan(disc_type="Blu-ray disc")
             service = service_factory.return_value
             service.makemkv.drives.return_value = (scan.drive,)
             service.scan.return_value = scan
@@ -276,7 +292,8 @@ class CommandFlowTests(TestCase):
 
             rendered = output.getvalue()
             self.assertEqual(result, 0)
-            self.assertIn("[1/3] Analyse du DVD", rendered)
+            self.assertIn("[1/3] Analyse du disque", rendered)
+            self.assertIn("Support reconnu : Blu-ray disc", rendered)
             self.assertIn("[2/3] Choix du film", rendered)
             self.assertIn("[3/3] Création et vérification", rendered)
             self.assertIn("✓ Film créé et vérifié", rendered)
@@ -461,11 +478,11 @@ class MovieIdentificationTests(TestCase):
         browser_open.assert_called_once()
 
 
-def _disc_scan() -> DiscScan:
+def _disc_scan(*, disc_type: str = "DVD disc") -> DiscScan:
     drive = Drive(0, 2, 999, 12, "Lecteur USB", "MON_FILM", "/dev/rdisk4")
     return DiscScan(
         drive=drive,
-        disc_type="DVD disc",
+        disc_type=disc_type,
         titles=(
             DiscTitle(
                 1,

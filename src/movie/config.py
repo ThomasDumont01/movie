@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from movie.core.models import MovieError, OutputFormat, OutputQuality
+from movie.formats import allowed_qualities, default_quality
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +55,9 @@ def load_config(path: Path | None = None) -> MovieConfig:
     output = Path(raw_output).expanduser() if raw_output else None
     drive_index = payload.get("drive_index")
     if drive_index is not None and (
-        not isinstance(drive_index, int) or isinstance(drive_index, bool) or drive_index < 0
+        not isinstance(drive_index, int)
+        or isinstance(drive_index, bool)
+        or drive_index < 0
     ):
         raise MovieError("Le paramètre drive_index doit être un entier positif.")
     auto_run = _boolean_setting(payload, "auto_run", False)
@@ -64,30 +67,24 @@ def load_config(path: Path | None = None) -> MovieConfig:
         "convert_format",
         payload.get("output_format", OutputFormat.MP4.value),
     )
-    conversion_payload: dict[object, object] = {
-        "convert_format": migrated_format
-    }
+    conversion_payload: dict[object, object] = {"convert_format": migrated_format}
     convert_format = _enum_setting(
         conversion_payload,
         "convert_format",
         OutputFormat,
         OutputFormat.MP4,
     )
-    default_quality = (
-        OutputQuality.SOURCE
-        if convert_format is OutputFormat.MKV
-        else OutputQuality.BALANCED
-    )
+    format_default_quality = default_quality(convert_format)
     migrated_quality = payload.get(
         "convert_quality",
-        payload.get("output_quality", default_quality.value),
+        payload.get("output_quality", format_default_quality.value),
     )
     conversion_payload["convert_quality"] = migrated_quality
     convert_quality = _enum_setting(
         conversion_payload,
         "convert_quality",
         OutputQuality,
-        default_quality,
+        format_default_quality,
     )
     _validate_conversion_settings(convert_format, convert_quality)
     progress_delay = payload.get("progress_delay_seconds", 12.0)
@@ -147,7 +144,9 @@ def save_config(config: MovieConfig, path: Path | None = None) -> Path:
     except OSError as error:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-        raise MovieError(f"Impossible d'enregistrer la configuration : {destination}") from error
+        raise MovieError(
+            f"Impossible d'enregistrer la configuration : {destination}"
+        ) from error
     return destination
 
 
@@ -182,21 +181,9 @@ def _validate_conversion_settings(
     output_format: OutputFormat,
     output_quality: OutputQuality,
 ) -> None:
-    allowed = {
-        OutputFormat.MKV: {OutputQuality.SOURCE},
-        OutputFormat.MP4: {
-            OutputQuality.HIGH,
-            OutputQuality.BALANCED,
-            OutputQuality.COMPACT,
-        },
-        OutputFormat.M4V: {
-            OutputQuality.HIGH,
-            OutputQuality.BALANCED,
-            OutputQuality.COMPACT,
-        },
-    }
-    if output_quality not in allowed[output_format]:
-        profiles = ", ".join(item.value for item in allowed[output_format])
+    allowed = allowed_qualities(output_format)
+    if output_quality not in allowed:
+        profiles = ", ".join(item.value for item in allowed)
         raise MovieError(
             f"Le format {output_format.value.upper()} accepte les profils : {profiles}."
         )

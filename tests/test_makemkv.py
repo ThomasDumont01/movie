@@ -19,7 +19,7 @@ from movie.core.makemkv import (
 )
 from movie.core.models import DiscError, ProgressUpdate, ToolUnavailableError
 
-DVD_SCAN = '''\
+DVD_SCAN = """\
 MSG:1005,0,1,"MakeMKV started","%1 started","MakeMKV"
 MSG:5011,0,0,"Operation successfully completed","Operation successfully completed"
 DRV:0,2,999,12,"DVD-RW USB","MON, FILM","/dev/rdisk4"
@@ -39,10 +39,40 @@ SINFO:0,1,1,6202,"Audio"
 SINFO:0,2,1,6203,"Subtitle"
 TINFO:1,2,0,"Bonus"
 TINFO:1,9,0,"0:12:08"
-'''
+"""
+
+BLURAY_SCAN = """\
+MSG:5011,0,0,"Operation successfully completed","Operation successfully completed"
+DRV:0,2,999,12,"BD-RE USB","FILM_UHD","/dev/rdisk5"
+CINFO:1,6209,"Blu-ray disc"
+CINFO:2,0,"FILM_UHD"
+TCOUNT:1
+TINFO:0,2,0,"Film UHD"
+TINFO:0,8,0,"24"
+TINFO:0,9,0,"2:12:03"
+TINFO:0,11,0,"68719476736"
+TINFO:0,16,0,"00000.mpls"
+TINFO:0,27,0,"FILM_UHD_t00.mkv"
+SINFO:0,0,1,6201,"Video"
+SINFO:0,1,1,6202,"Audio"
+SINFO:0,1,3,0,"fra"
+SINFO:0,2,1,6203,"Subtitle"
+"""
 
 
 class MakeMkvParserTests(unittest.TestCase):
+    def test_bluray_uses_the_same_normalized_disc_model(self) -> None:
+        report = parse_robot_report(BLURAY_SCAN)
+
+        self.assertEqual(report.disc_type, "Blu-ray disc")
+        self.assertEqual(report.drives[0].name, "BD-RE USB")
+        self.assertEqual(report.titles[0].source_name, "00000.mpls")
+        self.assertEqual(report.titles[0].size_bytes, 68_719_476_736)
+        self.assertEqual(
+            tuple(stream.kind for stream in report.titles[0].streams),
+            ("video", "audio", "subtitle"),
+        )
+
     def test_scan_preserves_quoted_values_and_main_title_data(self) -> None:
         report = parse_robot_report(DVD_SCAN)
 
@@ -67,15 +97,17 @@ class MakeMkvParserTests(unittest.TestCase):
         self.assertEqual(parse_duration("0:00:01.5"), 1.5)
         self.assertIsNone(parse_duration("inconnue"))
 
-    def test_relevant_success_diagnostics_are_preserved_without_routine_noise(self) -> None:
+    def test_relevant_success_diagnostics_are_preserved_without_routine_noise(
+        self,
+    ) -> None:
         run = MakeMkvRun(
             0,
-            '''\
+            """\
 MSG:1005,0,1,"MakeMKV started","%1 started","MakeMKV"
 MSG:5011,0,0,"Operation successfully completed","ok"
 MSG:0,0,0,"AV synchronization issue in stream 1","warning"
 MSG:0,0,0,"Empty subtitle track was removed","warning"
-''',
+""",
         )
 
         self.assertEqual(len(run.diagnostics), 2)
@@ -131,11 +163,14 @@ MSG:5010,0,0,"Failed to open disc","Failed to open disc"
 TCOUNT:0
 """
         client = MakeMkvClient("/outil/makemkvcon")
-        with patch.object(
-            client,
-            "_run_streaming",
-            return_value=MakeMkvRun(return_code=0, output=report),
-        ), self.assertRaisesRegex(DiscError, "n'a pas pu ouvrir le disque"):
+        with (
+            patch.object(
+                client,
+                "_run_streaming",
+                return_value=MakeMkvRun(return_code=0, output=report),
+            ),
+            self.assertRaisesRegex(DiscError, "n'a pas pu ouvrir le disque"),
+        ):
             client.scan(0)
 
 
@@ -158,12 +193,9 @@ class MakeMkvClientTests(unittest.TestCase):
     def test_drives_filters_reserved_empty_slots(self) -> None:
         client = MakeMkvClient("makemkv-test")
         output = (
-            'DRV:0,2,999,0,"Lecteur","FILM","/dev/rdisk4"\n'
-            'DRV:1,256,999,0,"","",""\n'
+            'DRV:0,2,999,0,"Lecteur","FILM","/dev/rdisk4"\nDRV:1,256,999,0,"","",""\n'
         )
-        with patch.object(
-            client, "_run", return_value=MakeMkvRun(0, output)
-        ):
+        with patch.object(client, "_run", return_value=MakeMkvRun(0, output)):
             drives = client.drives()
 
         self.assertEqual(len(drives), 1)
@@ -196,7 +228,7 @@ class MakeMkvClientTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(MakeMkvError, "lecture impossible"),
         ):
-                client.scan(0)
+            client.scan(0)
 
     def test_iso_scan_uses_makemkv_source_and_a_synthetic_drive(self) -> None:
         client = MakeMkvClient("makemkv-test")

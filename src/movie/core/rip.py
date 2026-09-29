@@ -1,4 +1,4 @@
-"""Planification, vérification et publication sûre d'une numérisation DVD."""
+"""Planification, vérification et publication sûre d'un disque vidéo."""
 
 from __future__ import annotations
 
@@ -62,8 +62,9 @@ def select_main_title(scan: DiscScan) -> DiscTitle:
 def main_title_candidates(scan: DiscScan) -> tuple[DiscTitle, ...]:
     """Retourne les titres les plus longs, à une seconde près.
 
-    Certains DVD présentent plusieurs PGC/angles/éditions indiscernables à
-    l'analyse. Préférer une confirmation utilisateur à un choix arbitraire.
+    Certains disques présentent plusieurs PGC, playlists, angles ou éditions
+    indiscernables à l'analyse. Une confirmation vaut mieux qu'un choix
+    arbitraire.
     """
 
     titles_with_duration = [
@@ -88,13 +89,6 @@ def build_rip_plan(
     title_id: int | None = None,
 ) -> RipPlan:
     """Construit le plan sans créer de dossier ni de fichier."""
-
-    if not scan.disc_type or "dvd" not in scan.disc_type.lower():
-        detected = scan.disc_type or "non identifié"
-        raise DiscError(
-            "Cette première version accepte seulement les DVD "
-            f"(support détecté : {detected})."
-        )
 
     title = (
         next((item for item in scan.titles if item.title_id == title_id), None)
@@ -232,10 +226,7 @@ class RipService:
 def _safe_filename(title: DiscTitle) -> str:
     source_name = title.output_name or f"titre-{title.title_id:02}.mkv"
     path = Path(source_name)
-    if (
-        path.name != source_name
-        or not path.stem
-    ):
+    if path.name != source_name or not path.stem:
         return f"titre-{title.title_id:02}.mkv"
     candidate = f"{path.stem}.mkv"
     if len(candidate.encode("utf-8")) > _MAX_FILENAME_BYTES:

@@ -29,8 +29,8 @@ def conversion_required_bytes(
     source_size = source.stat().st_size
     if iso_title is not None and iso_title.size_bytes:
         source_size = iso_title.size_bytes
-    # Une conversion ISO vers MP4/M4V conserve simultanément le MKV extrait et
-    # le fichier final. Toute autre conversion ne crée qu'une nouvelle sortie.
+    # Une conversion ISO vers un format réencodé conserve simultanément le MKV
+    # extrait et le fichier final. Toute autre conversion crée une seule sortie.
     copies = 2 if iso_title is not None and output_format is not OutputFormat.MKV else 1
     return source_size * copies + PUBLICATION_MARGIN_BYTES
 
@@ -95,7 +95,9 @@ def format_bytes(value: int) -> str:
     amount = float(value)
     for unit in ("octets", "Ko", "Mo", "Go", "To"):
         if amount < 1024 or unit == "To":
-            return f"{int(amount)} {unit}" if unit == "octets" else f"{amount:.1f} {unit}"
+            return (
+                f"{int(amount)} {unit}" if unit == "octets" else f"{amount:.1f} {unit}"
+            )
         amount /= 1024
     return f"{value} octets"
 

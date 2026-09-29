@@ -34,6 +34,11 @@ from movie.core.workflow import (
     report_stage,
     single_mkv,
 )
+from movie.formats import (
+    allowed_qualities,
+    default_quality,
+    supported_output_values,
+)
 
 _MAX_FILENAME_BYTES = 240
 
@@ -131,14 +136,13 @@ def conversion_settings(
     try:
         selected_format = OutputFormat(output_format)
     except ValueError as error:
-        raise MovieError("Le format de sortie doit être mkv, mp4 ou m4v.") from error
+        raise MovieError(
+            "Le format de sortie doit être l'un des suivants : "
+            f"{supported_output_values()}."
+        ) from error
 
     if output_quality is None:
-        selected_quality = (
-            OutputQuality.SOURCE
-            if selected_format is OutputFormat.MKV
-            else OutputQuality.BALANCED
-        )
+        selected_quality = default_quality(selected_format)
     else:
         try:
             selected_quality = OutputQuality(output_quality)
@@ -147,21 +151,9 @@ def conversion_settings(
                 "Le profil doit être source, high, balanced ou compact."
             ) from error
 
-    allowed = {
-        OutputFormat.MKV: {OutputQuality.SOURCE},
-        OutputFormat.MP4: {
-            OutputQuality.HIGH,
-            OutputQuality.BALANCED,
-            OutputQuality.COMPACT,
-        },
-        OutputFormat.M4V: {
-            OutputQuality.HIGH,
-            OutputQuality.BALANCED,
-            OutputQuality.COMPACT,
-        },
-    }
-    if selected_quality not in allowed[selected_format]:
-        profiles = ", ".join(item.value for item in allowed[selected_format])
+    allowed = allowed_qualities(selected_format)
+    if selected_quality not in allowed:
+        profiles = ", ".join(item.value for item in allowed)
         raise MovieError(
             f"Le format {selected_format.value.upper()} accepte les profils : {profiles}."
         )
@@ -196,8 +188,7 @@ class ConversionService:
             warnings: list[str] = []
             source_file = plan.source
             direct_iso_mkv = (
-                plan.iso_title is not None
-                and plan.output_format is OutputFormat.MKV
+                plan.iso_title is not None and plan.output_format is OutputFormat.MKV
             )
 
             if plan.iso_title is not None:
@@ -303,7 +294,9 @@ def _destination_path(
     output_directory: Path | str | None,
 ) -> Path:
     if output is not None and output_directory is not None:
-        raise MovieError("Choisis soit un fichier, soit un dossier de sortie, pas les deux.")
+        raise MovieError(
+            "Choisis soit un fichier, soit un dossier de sortie, pas les deux."
+        )
     if output is not None:
         destination = Path(output).expanduser()
         if destination.suffix.casefold() != f".{output_format.value}":

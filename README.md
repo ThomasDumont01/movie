@@ -3,7 +3,7 @@
 Movie est un outil macOS interactif pour numériser, convertir et renseigner des
 médias sans avoir à connaître MakeMKV, FFmpeg ou les codecs.
 
-La version publique actuelle est **0.2.0**.
+La version publique actuelle est **0.3.0**.
 
 Son interface repose sur quelques commandes sans paramètres techniques :
 
@@ -21,17 +21,18 @@ Movie pose ensuite uniquement les questions nécessaires. Les commandes
 opérationnelles `scan`, `rip`, `convert` et `tag` n'acceptent volontairement pas
 d'options comme `--profile`, `--title` ou `--metadata-url`.
 
-> **Compatibilité des disques :** la version 0.2.0 prend en charge la
-> numérisation des **DVD uniquement**. Les Blu-ray et Blu-ray UHD ne sont pas
-> acceptés par `rip`, même si MakeMKV et le lecteur savent les ouvrir. Leur
-> prise en charge n'a pas encore été développée ni validée sur un support réel.
+> **Compatibilité des disques :** `scan` et `rip` prennent en charge les DVD,
+> Blu-ray et Blu-ray UHD que MakeMKV et le lecteur optique savent ouvrir. Un
+> Blu-ray exige un lecteur Blu-ray ; un UHD exige en plus un lecteur et un
+> firmware compatibles avec MakeMKV. Les CD audio et disques de données ne sont
+> pas des disques vidéo MakeMKV et ne sont donc pas traités par `rip`.
 
 Pour choisir sans réfléchir :
 
-- un DVD à archiver fidèlement : `uv run movie rip` ;
+- un DVD, Blu-ray ou UHD à archiver fidèlement : `uv run movie rip` ;
 - un fichier ou une ISO à changer de format : `uv run movie convert` ;
 - un titre, une année ou une jaquette à ajouter : `uv run movie tag` ;
-- seulement voir le contenu du DVD : `uv run movie scan`.
+- seulement voir le contenu d'un disque vidéo : `uv run movie scan`.
 
 Tu peux coller un chemin ou glisser un fichier depuis Finder dans Terminal ;
 les espaces, guillemets et antislashs ajoutés par macOS sont acceptés.
@@ -42,9 +43,10 @@ Movie nécessite :
 
 - macOS et Python 3.12 ou plus récent ;
 - [uv](https://docs.astral.sh/uv/) ;
-- [MakeMKV](https://www.makemkv.com/download/) pour les DVD et les images ISO ;
-- un lecteur compatible avec le support utilisé — un lecteur DVD ne peut pas
-  lire un Blu-ray ;
+- [MakeMKV](https://www.makemkv.com/download/) pour les disques vidéo et les
+  images ISO ;
+- un lecteur compatible avec le support utilisé — un lecteur DVD ne lit pas un
+  Blu-ray, et tous les lecteurs Blu-ray ne savent pas ouvrir un UHD ;
 - FFmpeg et ffprobe : `brew install ffmpeg`.
 
 Installation du projet :
@@ -62,11 +64,11 @@ d'installation lorsqu'un prérequis manque.
 ## Fonctionnement général
 
 ```text
-DVD ── rip ──> MKV source ──┐
-                            ├── convert si nécessaire ──> fichier final
-ISO / fichier local ────────┘                                  │
-                                                               └── tag
-                                                        TMDB ou saisie manuelle
+DVD / Blu-ray / UHD ── rip ──> MKV source ──┐
+                                             ├── convert ──> fichier final
+ISO / fichier local ─────────────────────────┘                    │
+                                                                  └── tag
+                                                           TMDB ou saisie manuelle
 ```
 
 Chaque commande possède une seule responsabilité :
@@ -75,16 +77,16 @@ Chaque commande possède une seule responsabilité :
 | --- | --- | --- |
 | `doctor` | vérifie MakeMKV, FFmpeg et ffprobe | non |
 | `drives` | affiche les lecteurs optiques | non |
-| `scan` | analyse le DVD et affiche ses titres | non |
-| `rip` | extrait un titre du DVD en MKV | crée un fichier |
+| `scan` | analyse le disque vidéo et affiche ses titres | non |
+| `rip` | extrait un titre du disque en MKV | crée un fichier |
 | `convert` | change le format ou le codec | crée un fichier |
 | `tag` | ajoute ou corrige les métadonnées | met à jour un fichier |
 | `config` | enregistre les préférences | écrit la configuration |
 
 Cette séparation garantit qu'une panne réseau ou une mauvaise jaquette ne peut
-plus faire échouer une longue numérisation de DVD.
+plus faire échouer une longue numérisation de disque.
 
-## Analyser un DVD
+## Analyser un disque vidéo
 
 ```bash
 uv run movie scan
@@ -95,10 +97,10 @@ durée, ses chapitres et ses pistes. Une étoile signale le ou les titres
 principaux possibles. Aucun fichier n'est créé.
 
 `scan` est uniquement informatif. Son résultat n'est pas mis en cache :
-`rip` refait toujours automatiquement une analyse récente du DVD avant de
+`rip` refait toujours automatiquement une analyse récente du disque avant de
 proposer le titre à extraire.
 
-## Numériser un DVD
+## Numériser un DVD, Blu-ray ou UHD
 
 ```bash
 uv run movie rip
@@ -106,7 +108,7 @@ uv run movie rip
 
 Movie :
 
-1. détecte et analyse le DVD ;
+1. détecte et analyse le disque avec MakeMKV ;
 2. propose automatiquement le titre le plus long ;
 3. demande un choix si plusieurs titres ont la même durée ;
 4. extrait ce titre avec MakeMKV, sans réencodage ;
@@ -117,16 +119,15 @@ Movie :
 est le MKV source produit par MakeMKV. Movie ne choisit jamais arbitrairement
 entre plusieurs éditions ou angles indiscernables.
 
-Cette commande refuse actuellement les Blu-ray et Blu-ray UHD. `scan` peut
-éventuellement afficher les informations que MakeMKV détecte sur un tel disque,
-mais cela ne constitue pas une prise en charge : la création du plan de
-numérisation sera bloquée avant toute écriture. Les ISO issues d'un Blu-ray ne
-sont pas davantage garanties par `convert`, même si certaines peuvent être
-ouvertes techniquement par MakeMKV.
+Movie ne maintient aucune liste artificielle de types autorisés : si MakeMKV
+ouvre le support et expose au moins un titre vidéo, la même pipeline sûre est
+utilisée pour le DVD, le Blu-ray, l'UHD et leurs images ISO. Si le lecteur, son
+firmware, la version de MakeMKV ou les clés nécessaires ne permettent pas
+l'ouverture, l'opération s'arrête avant toute création de fichier final.
 
 La vérification bloque uniquement un résultat manifestement inutilisable ou
 tronqué : fichier illisible, vidéo absente, audio totalement absent alors que
-le DVD en annonce, durée nulle ou écart supérieur à 5 % et à 3 secondes. Les
+le support en annonce, durée nulle ou écart supérieur à 5 % et à 3 secondes. Les
 pistes optionnelles absentes, les étiquettes de langue différentes et un nombre
 de chapitres inférieur sont signalés sans détruire un film par ailleurs valide.
 MakeMKV peut notamment annoncer un sous-titre pendant l'analyse puis le retirer
@@ -139,30 +140,54 @@ uv run movie convert
 ```
 
 Movie demande le fichier source, le format final et, si nécessaire, la priorité
-entre qualité et taille. Une image ISO est ouverte avec MakeMKV ; un fichier
-multimédia ordinaire est lu directement avec FFmpeg.
+entre qualité et taille. Une image ISO est ouverte avec MakeMKV. Tout autre
+fichier est identifié par son contenu avec FFmpeg : MPG, ASF, MTS, AVI, MOV,
+WebM, MPEG-TS, WMV, FLV, VOB et les autres formats que FFmpeg sait
+décoder peuvent donc servir d'entrée. L'extension seule ne décide pas si le
+fichier est accepté.
 
-| Sortie | Choix proposé | Traitement |
+Cette compatibilité d'entrée signifie que FFmpeg doit savoir décoder les flux
+du fichier. Une combinaison exotique que le conteneur final ne sait pas porter
+est refusée proprement, sans publier de résultat partiel.
+
+Les sorties sont volontairement limitées à des associations conteneur/codecs
+valides, lisibles et contrôlables :
+
+| Sortie | Codecs produits | Usage conseillé |
 | --- | --- | --- |
-| MKV | qualité source | copie de toutes les pistes sans réencodage |
-| MP4 | qualité maximale | H.264 CRF 18, audio AAC 320 kbit/s |
-| MP4 | équilibré | H.264 CRF 21, audio AAC 256 kbit/s |
-| MP4 | compact | H.264 CRF 25, audio AAC 160 kbit/s |
-| M4V | qualité maximale | H.264 CRF 18, audio AAC 320 kbit/s |
-| M4V | équilibré | H.264 CRF 21, audio AAC 256 kbit/s |
-| M4V | compact | H.264 CRF 25, audio AAC 160 kbit/s |
+| MKV | codecs source, sans réencodage | archive fidèle avec toutes les pistes |
+| MP4 | H.264 + AAC | compatibilité la plus universelle |
+| M4V | H.264 + AAC | application Apple exigeant cette extension |
+| MOV | H.264 + AAC | QuickTime et logiciels de montage |
+| WebM | VP9 + Opus | publication web moderne, avec un encodage plus lent |
+| AVI | MPEG-4 Part 2 + MP3 | ancien appareil ou logiciel |
+| MPG | MPEG-2 + MP2 | ancien lecteur MPEG-2, sans créer un DVD avec menus |
+| ASF | WMV2 + WMA2 | ancien conteneur multimédia Windows |
+| WMV | WMV2 + WMA2 | ancien environnement Windows |
+| FLV | FLV1 + MP3 | ancien lecteur Flash |
+| TS | H.264 + AAC | transport ou diffusion MPEG-TS |
+| MTS | H.264 + AAC | caméscope ou fichier de transport MPEG-TS |
 
-Le profil équilibré est recommandé dans la majorité des cas. MP4 et M4V
-contiennent ici les mêmes codecs H.264/AAC. Choisis MP4 pour l'extension la plus
-universelle, ou M4V lorsqu'une application Apple attend explicitement cette
-extension vidéo.
+Pour chaque sortie réencodée, Movie propose trois priorités :
+
+| Famille | Haute qualité | Équilibré | Compact |
+| --- | --- | --- | --- |
+| MP4, M4V, MOV, TS, MTS | H.264 CRF 18, AAC 320 kbit/s | H.264 CRF 21, AAC 256 kbit/s | H.264 CRF 25, AAC 160 kbit/s |
+| WebM | VP9 CRF 20, Opus 192 kbit/s | VP9 CRF 30, Opus 128 kbit/s | VP9 CRF 38, Opus 96 kbit/s |
+| AVI, MPG, ASF, WMV, FLV | qualité 2, audio 320 kbit/s | qualité 4, audio 192 kbit/s | qualité 7, audio 128 kbit/s |
+
+Le profil équilibré en MP4 reste le meilleur choix par défaut. Un format ancien
+ne rend pas une vidéo meilleure ; AVI, MPG, ASF, WMV et FLV existent uniquement
+pour les appareils qui les imposent. MKV est le seul choix proposé en copie directe,
+car c'est le conteneur d'archive le plus apte à conserver les pistes hétérogènes.
 
 Une ISO destinée au MKV est extraite puis publiée directement, sans remuxage
-inutile. Une ISO destinée au MP4 ou au M4V est d'abord extraite en MKV
-temporaire, vérifiée, puis convertie. Toutes les pistes audio sont conservées.
-Les sous-titres bitmap des DVD ne sont pas copiés silencieusement vers un MP4
-ou un M4V : leur exclusion est annoncée et le MKV est recommandé pour les
-conserver.
+inutile. Pour toute autre sortie, elle est d'abord extraite en MKV temporaire,
+vérifiée, puis convertie. Toutes les pistes audio sont conservées. Les pistes de
+sous-titres ne sont jamais abandonnées silencieusement : leur exclusion des
+sorties réencodées est annoncée, de même que la perte éventuelle de chapitres ou
+d'étiquettes de langue dans les anciens conteneurs. Choisis MKV pour tout
+conserver sans compromis.
 
 Le fichier converti est créé dans le dossier configuré ou, par défaut, à côté
 de la source. Une destination existante n'est jamais remplacée.
@@ -250,7 +275,7 @@ connus ;
 - l'ouverture automatique de la recherche TMDB pendant `tag`.
 
 La configuration est enregistrée dans `~/.config/movie/config.json`. Même avec
-`auto_run`, Movie demande toujours une décision lorsqu'un titre de DVD/ISO ou
+`auto_run`, Movie demande toujours une décision lorsqu'un titre de disque/ISO ou
 une fiche TMDB ne peut pas être choisi sans risque.
 
 ## Progression, erreurs et fichiers temporaires
@@ -283,7 +308,7 @@ Movie applique les garanties suivantes :
 ## Movie, MakeMKV et `dd`
 
 Movie ne remplace pas le moteur MakeMKV : il l'utilise. Pendant la copie des
-données du DVD vers le MKV, la vitesse est donc essentiellement celle de
+données du disque vers le MKV, la vitesse est donc essentiellement celle de
 MakeMKV et du lecteur optique.
 
 MakeMKV utilisé directement peut terminer plus vite sur une numérisation
@@ -302,10 +327,10 @@ vérifier, convertir et renseigner les fichiers.
 
 `dd` répond à un autre besoin. Il copie les secteurs du disque vers une image
 brute ou ISO ; il ne choisit pas un titre, ne produit pas un MKV, ne normalise
-pas les pistes et ne garantit pas le traitement des protections DVD. Il est
+pas les pistes et ne garantit pas le traitement des protections vidéo. Il est
 adapté à la duplication bit à bit d'un disque lisible, notamment un disque de
-données ou personnel. Pour obtenir un film MKV exploitable à partir d'un DVD
-commercial, MakeMKV reste le composant approprié. Une image créée avec `dd`
+données ou personnel. Pour obtenir un film MKV exploitable à partir d'un disque
+vidéo commercial, MakeMKV reste le composant approprié. Une image créée avec `dd`
 peut néanmoins être conservée comme archive du support puis fournie à
 `movie convert` si MakeMKV sait l'ouvrir.
 
@@ -318,16 +343,18 @@ uv run ruff check src tests
 uv run pyright
 ```
 
-État vérifié le 28 septembre 2026 pour la version 0.2.0 :
+État vérifié le 29 septembre 2026 pour la version 0.3.0 :
 
-- 151 tests et 13 sous-tests réussissent ;
-- la couverture automatisée atteint 85 % des lignes ;
+- 160 tests et 85 sous-tests réussissent ;
+- la couverture automatisée atteint 86 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;
 - les outils de développement sont déclarés et verrouillés dans le projet ;
 - la distribution source et la wheel se construisent correctement ;
-- de vrais appels FFmpeg/ffprobe vérifient MKV, MP4 H.264/AAC, M4V H.264/AAC,
-  métadonnées manuelles/TMDB et remplacement des jaquettes ;
+- de vrais appels FFmpeg/ffprobe créent et relisent MKV, MP4, M4V, MOV, WebM,
+  AVI, MPG, ASF, WMV, FLV, TS et MTS, puis réutilisent chacun comme source d'un MP4 ;
+- les métadonnées manuelles/TMDB et le remplacement des jaquettes sont aussi
+  contrôlés avec de vrais médias ;
 - la fiche TMDB fournie pour *Star Wars : L'Ascension de Skywalker* et sa
   jaquette ont été récupérées puis intégrées dans un vrai extrait MKV du DVD ;
 - le DVD physique `THE_RISE_OF_SKYWALKER` a été détecté et analysé ;
@@ -336,18 +363,25 @@ uv run pyright
 - le MKV final dure 2:16:04.2 et contient 1 vidéo, 3 audios, 7 sous-titres et
   44 chapitres ; MakeMKV en annonçait 45, différence conservée comme
   avertissement non destructif ;
-- les profils MP4 et M4V sont aussi exécutés sur un extrait réel de ce film.
+- les profils MP4 et M4V sont aussi exécutés sur un extrait réel de ce film ;
+- la publication atomique et la protection anti-écrasement ont été validées
+  directement sur un partage Synology monté en SMB ;
+- les rapports MakeMKV Blu-ray/UHD, les playlists MPLS et les tailles de titre
+  supérieures à 64 Go sont couverts par les tests automatisés ; aucun Blu-ray
+  physique n'était disponible pour cette validation.
 
 ## Limites, expliquées simplement
 
 | Limite | Ce que cela signifie concrètement | Choix conseillé |
 | --- | --- | --- |
 | MakeMKV reste nécessaire | Movie pilote MakeMKV ; il ne réimplémente ni la lecture optique ni le déchiffrement. Si MakeMKV refuse un disque, Movie ne peut pas le forcer. | Vérifier d'abord le disque dans MakeMKV et relancer `doctor`. |
-| Blu-ray et UHD non pris en charge | `rip` les refuse explicitement. `scan` peut parfois les reconnaître et `convert` peut parfois ouvrir leur ISO, mais ces parcours ne sont ni développés ni testés comme compatibles. | Utiliser Movie uniquement avec des DVD pour la version 0.2.0. |
+| Compatibilité Blu-ray/UHD dépendante du matériel | Movie accepte ces supports, mais ne peut pas ajouter à un lecteur les capacités optiques ou le firmware requis par MakeMKV. Certains UHD nécessitent un lecteur spécifiquement compatible. | Vérifier le support avec `movie scan` ; si MakeMKV ne peut pas l'ouvrir, utiliser un lecteur/firmware compatible. |
+| Pas de CD audio ni de disque de données | MakeMKV expose des titres vidéo, pas les pistes d'un CD audio ni les fichiers d'un disque de données. | Employer un outil d'extraction audio ou une copie de fichiers adaptée à ces supports. |
 | Un titre est extrait à la fois | Un disque de série avec plusieurs épisodes demande une exécution par épisode. | Relancer `rip` ou `convert` pour chaque titre voulu. |
-| Les menus ne sont pas conservés | Le MKV, MP4 ou M4V contient le film et ses pistes, pas l'interface interactive du DVD. | Conserver une image complète du disque si les menus sont indispensables. |
-| Les sous-titres DVD sont des images | Ils restent dans le MKV, mais ne sont pas transformés en texte et ne sont pas intégrés au MP4/M4V. | Choisir MKV pour conserver tous les sous-titres. |
+| Les menus ne sont pas conservés | Un fichier vidéo contient le film et ses pistes, pas l'interface interactive du disque. | Conserver une image complète du disque si les menus sont indispensables. |
+| Certains sous-titres optiques sont des images | Les VobSub des DVD et PGS des Blu-ray restent dans le MKV, mais ne sont pas transformés en texte ni intégrés aux sorties réencodées. | Choisir MKV pour conserver tous les sous-titres. |
+| Les sorties ne couvrent pas chaque muxeur FFmpeg | FFmpeg expose aussi des flux bruts, protocoles, formats audio et conteneurs professionnels qui demandent des réglages particuliers. Les proposer aveuglément produirait des fichiers invalides ou trompeurs. | Utiliser l'une des douze sorties vérifiées ; ajouter un profil dédié lorsqu'un besoin réel apparaît. |
 | Pas de désentrelacement automatique | Certains anciens DVD peuvent montrer des lignes pendant les mouvements. Movie préfère préserver la source plutôt qu'appliquer un filtre potentiellement mauvais. | Lire le MKV avec un lecteur qui désentrelace, ou ajouter plus tard un profil dédié. |
 | Pas d'export audio seul | M4V est un format vidéo. Movie produit donc une vidéo H.264 avec ses pistes AAC, comme pour MP4. | Employer FFmpeg directement si le besoin est uniquement d'extraire le son. |
 | TMDB est lu sans clé API | Movie analyse la page publique choisie. Un changement du site peut temporairement casser l'identification. | Utiliser la saisie manuelle si TMDB est indisponible. |
-| ISO physique encore à qualifier en 0.2.0 | La pipeline ISO est couverte par les tests automatisés, mais aucune copie ISO complète de ce DVD n'a été menée jusqu'au bout pour cette version. | Conserver le MKV issu de `rip` comme résultat matériel validé. |
+| Blu-ray physique encore à qualifier en 0.3.0 | La pipeline et les rapports Blu-ray sont couverts automatiquement, mais le matériel disponible n'a permis qu'une extraction DVD complète. | Faire un premier `scan`, puis conserver le MKV seulement après la vérification automatique et un contrôle de lecture. |

@@ -197,13 +197,19 @@ def _prompt_choice(
     choices: dict[str, str],
     default: str,
 ) -> str:
-    rendered_choices = " / ".join(
-        f"{value} ({description})" for value, description in choices.items()
-    )
+    if len(choices) <= 4:
+        rendered_choices = " / ".join(
+            f"{value} ({description})" for value, description in choices.items()
+        )
+        question = f"{label} [{default}] — {rendered_choices} : "
+    else:
+        print(f"{label} :")
+        for value, description in choices.items():
+            marker = " (par défaut)" if value == default else ""
+            print(f"  {value:<5} {description}{marker}")
+        question = f"Choix [{default}] : "
     while True:
-        answer = _read_answer(
-            f"{label} [{default}] — {rendered_choices} : "
-        ).casefold()
+        answer = _read_answer(question).casefold()
         selected = answer or default
         if selected in choices:
             return selected
@@ -349,7 +355,9 @@ def _format_file_size(size_bytes: int) -> str:
     amount = float(size_bytes)
     for unit in ("octets", "Ko", "Mo", "Go", "To"):
         if amount < 1024 or unit == "To":
-            return f"{int(amount)} {unit}" if unit == "octets" else f"{amount:.1f} {unit}"
+            return (
+                f"{int(amount)} {unit}" if unit == "octets" else f"{amount:.1f} {unit}"
+            )
         amount /= 1024
     return f"{size_bytes} octets"
 
@@ -366,10 +374,13 @@ def _media_summary(stream_types: Sequence[str]) -> str:
         "subtitle": "sous-titre",
         "attachment": "jaquette",
     }
-    return " · ".join(
-        f"{count} {labels[kind]}{'s' if count > 1 else ''}"
-        for kind, count in counts.items()
-    ) or "aucune piste utile"
+    return (
+        " · ".join(
+            f"{count} {labels[kind]}{'s' if count > 1 else ''}"
+            for kind, count in counts.items()
+        )
+        or "aucune piste utile"
+    )
 
 
 class _ProgressRenderer:
@@ -467,10 +478,7 @@ class _ProgressRenderer:
             self._cancel_timer()
             now = self._clock()
             elapsed = self._elapsed(now)
-            summary = (
-                f"{self._operation_label} terminée en "
-                f"{_format_timespan(elapsed)}"
-            )
+            summary = f"{self._operation_label} terminée en {_format_timespan(elapsed)}"
             if self._bar_is_visible:
                 self._write_bar(1.0, summary, now=now, show_eta=False)
                 self._stream.write("\n")
@@ -598,10 +606,11 @@ class _ProgressRenderer:
         ]
         rates = [
             (current_fraction - previous_fraction) / (current_time - previous_time)
-            for (previous_time, previous_fraction), (current_time, current_fraction)
-            in zip(self._progress_samples, self._progress_samples[1:])
-            if current_time > previous_time
-            and current_fraction > previous_fraction
+            for (previous_time, previous_fraction), (
+                current_time,
+                current_fraction,
+            ) in zip(self._progress_samples, self._progress_samples[1:])
+            if current_time > previous_time and current_fraction > previous_fraction
         ]
         if len(rates) < 3:
             return None

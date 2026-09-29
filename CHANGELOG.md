@@ -1,5 +1,21 @@
 # Historique des versions
 
+## 0.3.0 — 2026-09-29
+
+- `scan` et `rip` généralisés aux DVD, Blu-ray et Blu-ray UHD ouverts par
+  MakeMKV, sans restriction artificielle sur le type de disque ;
+- rapports Blu-ray, playlists MPLS et titres de plus de 64 Go couverts par les
+  tests automatisés ;
+- toutes les sources multimédias reconnues par FFmpeg peuvent alimenter
+  `convert`, indépendamment de leur extension ;
+- sorties MOV, WebM, AVI, MPG, ASF, WMV, FLV, MPEG-TS et MTS ajoutées aux
+  sorties MKV, MP4 et M4V ;
+- codecs, profils de qualité, capacités des conteneurs et règles de
+  vérification centralisés dans un catalogue unique ;
+- vérification spécifique des codecs, pistes audio, langues, chapitres et
+  durée pour chaque sortie ;
+- tests FFmpeg réels de chaque format en sortie puis comme nouvelle entrée.
+
 ## 0.2.0 — 2026-09-28
 
 - sortie M4V vidéo H.264/AAC disponible avec les profils haute qualité,
@@ -11,7 +27,9 @@
 - estimation du temps restant fondée sur la vitesse récente ;
 - chemins glissés depuis Finder acceptés avec leurs espaces échappés ;
 - nommage automatique des médias renseignés pour Infuse et les autres lecteurs,
-  avec identifiant TMDB exact lorsqu'il est disponible.
+  avec identifiant TMDB exact lorsqu'il est disponible ;
+- publication atomique compatible avec les partages réseau SMB qui refusent
+  les liens physiques, notamment les dossiers Synology montés sur macOS.
 
 ## 0.1.0 — 2026-09-28
 

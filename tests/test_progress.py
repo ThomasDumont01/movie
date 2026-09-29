@@ -93,9 +93,7 @@ class ProgressRendererTests(unittest.TestCase):
         self.assertNotIn("terminé", output.getvalue())
 
     @patch("movie.terminal.threading.Timer")
-    def test_real_terminal_timer_uses_configured_delay(
-        self, timer: MagicMock
-    ) -> None:
+    def test_real_terminal_timer_uses_configured_delay(self, timer: MagicMock) -> None:
         output = _TtyOutput()
         renderer = _ProgressRenderer(threshold_seconds=3.5, stream=output)
 
@@ -191,7 +189,7 @@ def _update(
 ) -> ProgressUpdate:
     return ProgressUpdate(
         current_label=label,
-        total_label="Numérisation du DVD",
+        total_label="Numérisation du disque",
         current_fraction=fraction,
         total_fraction=fraction if total is None else total,
     )

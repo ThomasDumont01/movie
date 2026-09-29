@@ -29,6 +29,15 @@ class OutputFormat(StrEnum):
     MKV = "mkv"
     MP4 = "mp4"
     M4V = "m4v"
+    MOV = "mov"
+    WEBM = "webm"
+    AVI = "avi"
+    MPG = "mpg"
+    ASF = "asf"
+    WMV = "wmv"
+    FLV = "flv"
+    TS = "ts"
+    MTS = "mts"
 
 
 class OutputQuality(StrEnum):
@@ -72,7 +81,7 @@ class MediaStream:
 
 @dataclass(frozen=True, slots=True)
 class DiscTitle:
-    """Titre DVD tel qu'analysé par MakeMKV."""
+    """Titre d'un disque vidéo tel qu'analysé par MakeMKV."""
 
     title_id: int
     name: str

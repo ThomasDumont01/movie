@@ -72,7 +72,9 @@ def build_tag_plan(
     if not source_path.is_file():
         raise MovieError(f"Le fichier à enrichir est introuvable : {source_path}")
     if source_path.suffix.casefold() not in _SUPPORTED_SUFFIXES:
-        raise MovieError("La commande tag accepte uniquement les fichiers MKV, MP4 et M4V.")
+        raise MovieError(
+            "La commande tag accepte uniquement les fichiers MKV, MP4 et M4V."
+        )
 
     title = " ".join(metadata.title.split())
     if not title:
@@ -102,8 +104,7 @@ def build_tag_plan(
     )
     if output != source_path and is_occupied(output):
         raise OutputExistsError(
-            "Le nom recommandé pour les lecteurs multimédias existe déjà : "
-            f"{output}"
+            f"Le nom recommandé pour les lecteurs multimédias existe déjà : {output}"
         )
     return TagPlan(source=source_path, output=output, metadata=normalized)
 

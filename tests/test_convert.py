@@ -20,6 +20,7 @@ from movie.core.models import (
     ProbedMedia,
     ProgressUpdate,
 )
+from movie.formats import OUTPUT_FORMAT_SPECS, output_spec
 
 
 class ConvertPlanTests(TestCase):
@@ -38,6 +39,28 @@ class ConvertPlanTests(TestCase):
             self.assertIs(m4v.output_quality, OutputQuality.BALANCED)
             self.assertEqual(mkv.output.name, "film.mkv")
             self.assertIs(mkv.output_quality, OutputQuality.SOURCE)
+
+            for output_format in OutputFormat:
+                with self.subTest(output_format=output_format):
+                    plan = build_convert_plan(source, output_format)
+                    self.assertEqual(plan.output.suffix, f".{output_format.value}")
+                    expected_quality = (
+                        OutputQuality.SOURCE
+                        if output_spec(output_format).copies_source
+                        else OutputQuality.BALANCED
+                    )
+                    self.assertIs(plan.output_quality, expected_quality)
+
+    def test_every_declared_output_has_a_conversion_rule(self) -> None:
+        self.assertEqual(set(OUTPUT_FORMAT_SPECS), set(OutputFormat))
+        for output_format, spec in OUTPUT_FORMAT_SPECS.items():
+            with self.subTest(output_format=output_format):
+                if spec.copies_source:
+                    self.assertIsNone(spec.video_codec)
+                    self.assertIsNone(spec.audio_codec)
+                else:
+                    self.assertIsNotNone(spec.video_codec)
+                    self.assertIsNotNone(spec.audio_codec)
 
     def test_same_extension_gets_a_distinct_default_name(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -103,9 +126,7 @@ class ConversionExecutionTests(TestCase):
             )
             probe = MagicMock(wraps=fake_probe)
 
-            ConversionService(
-                _FakeMakeMkv(), probe, _FakeConverter()
-            ).execute(plan)
+            ConversionService(_FakeMakeMkv(), probe, _FakeConverter()).execute(plan)
 
             self.assertEqual(probe.probe.call_count, 1)
             self.assertNotEqual(probe.probe.call_args.args[0], source)
@@ -149,6 +170,29 @@ class ConversionExecutionTests(TestCase):
             self.assertEqual(result.media.streams[0].codec, "h264")
             self.assertIn("M4V", result.warnings[0])
 
+    def test_every_encoded_format_is_verified_and_published(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "film.source"
+            source.write_bytes(b"source")
+
+            for output_format in OutputFormat:
+                if output_spec(output_format).copies_source:
+                    continue
+                with self.subTest(output_format=output_format):
+                    plan = build_convert_plan(source, output_format)
+                    result = ConversionService(
+                        _FakeMakeMkv(),
+                        _FakeProbe(),
+                        _FakeConverter(),
+                    ).execute(plan)
+
+                    self.assertEqual(result.output.suffix, f".{output_format.value}")
+                    self.assertEqual(
+                        result.media.streams[0].codec,
+                        output_spec(output_format).video_codec,
+                    )
+
     def test_iso_to_mkv_publishes_extraction_without_redundant_remux(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
@@ -158,9 +202,9 @@ class ConversionExecutionTests(TestCase):
             plan = build_convert_plan(iso, "mkv", iso_title=title)
             converter = MagicMock()
 
-            result = ConversionService(
-                _FakeMakeMkv(), _FakeProbe(), converter
-            ).execute(plan)
+            result = ConversionService(_FakeMakeMkv(), _FakeProbe(), converter).execute(
+                plan
+            )
 
             converter.convert.assert_not_called()
             self.assertEqual(result.output.read_bytes(), b"extracted")
@@ -173,9 +217,9 @@ class ConversionExecutionTests(TestCase):
             plan = build_convert_plan(iso, "m4v", iso_title=_iso_title())
             converter = MagicMock(wraps=_FakeConverter())
 
-            result = ConversionService(
-                _FakeMakeMkv(), _FakeProbe(), converter
-            ).execute(plan)
+            result = ConversionService(_FakeMakeMkv(), _FakeProbe(), converter).execute(
+                plan
+            )
 
             self.assertEqual(
                 tuple(
@@ -244,16 +288,21 @@ class _FakeMakeMkv:
 
 class _FakeProbe:
     def probe(self, path: Path) -> ProbedMedia:
-        if path.suffix in {".mp4", ".m4v"}:
+        try:
+            output_format = OutputFormat(path.suffix.removeprefix("."))
+        except ValueError:
+            output_format = None
+        if output_format is not None and not output_spec(output_format).copies_source:
+            spec = output_spec(output_format)
             return ProbedMedia(
                 path,
                 120,
                 ("video", "audio", "audio"),
                 2,
                 streams=(
-                    MediaStream("video", codec="h264"),
-                    MediaStream("audio", "fra", "aac"),
-                    MediaStream("audio", "eng", "aac"),
+                    MediaStream("video", codec=spec.video_codec),
+                    MediaStream("audio", "fra", spec.audio_codec),
+                    MediaStream("audio", "eng", spec.audio_codec),
                 ),
             )
         return ProbedMedia(

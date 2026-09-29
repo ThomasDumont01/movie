@@ -9,9 +9,22 @@ from unittest.mock import patch
 
 from movie.config import MovieConfig, load_config, save_config
 from movie.core.models import MovieError, OutputFormat, OutputQuality
+from movie.formats import default_quality
 
 
 class ConfigTests(TestCase):
+    def test_every_conversion_format_can_be_saved_and_loaded(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "config.json"
+            for output_format in OutputFormat:
+                with self.subTest(output_format=output_format):
+                    expected = MovieConfig(
+                        convert_format=output_format,
+                        convert_quality=default_quality(output_format),
+                    )
+                    save_config(expected, path)
+                    self.assertEqual(load_config(path), expected)
+
     def test_missing_file_returns_empty_config(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "config.json"

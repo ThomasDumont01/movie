@@ -13,16 +13,28 @@ from movie.core.models import (
     ProgressUpdate,
 )
 from movie.ffmpeg import find_ffmpeg, run_ffmpeg
+from movie.formats import EncodingFamily, output_spec
 
 
 class MediaConverter:
-    """Convertit un média selon un nombre réduit de profils prévisibles."""
+    """Convertit un média avec des associations conteneur/codecs prévisibles."""
 
     _VIDEO_PROFILES: ClassVar[dict[OutputQuality, tuple[int, str]]] = {
         OutputQuality.HIGH: (18, "320k"),
         OutputQuality.BALANCED: (21, "256k"),
         OutputQuality.COMPACT: (25, "160k"),
     }
+    _VP9_PROFILES: ClassVar[dict[OutputQuality, tuple[int, str]]] = {
+        OutputQuality.HIGH: (20, "192k"),
+        OutputQuality.BALANCED: (30, "128k"),
+        OutputQuality.COMPACT: (38, "96k"),
+    }
+    _LEGACY_PROFILES: ClassVar[dict[OutputQuality, tuple[int, str]]] = {
+        OutputQuality.HIGH: (2, "320k"),
+        OutputQuality.BALANCED: (4, "192k"),
+        OutputQuality.COMPACT: (7, "128k"),
+    }
+
     def __init__(self, executable: str | None = None) -> None:
         self.executable = executable
 
@@ -36,12 +48,16 @@ class MediaConverter:
         duration_seconds: float | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path:
-        if output_format is OutputFormat.MKV:
+        spec = output_spec(output_format)
+        if spec.copies_source:
             command = self._mkv_command(source, destination, quality)
-        elif output_format in {OutputFormat.MP4, OutputFormat.M4V}:
-            command = self._video_command(source, destination, quality)
-        else:  # pragma: no cover
-            raise MovieError(f"Format de conversion non pris en charge : {output_format}")
+        else:
+            command = self._video_command(
+                source,
+                destination,
+                output_format,
+                quality,
+            )
 
         command.extend(("-progress", "pipe:1", "-nostats", "-y", str(destination)))
         label = f"Conversion en {output_format.value.upper()}"
@@ -82,23 +98,135 @@ class MediaConverter:
         self,
         source: Path,
         destination: Path,
+        output_format: OutputFormat,
         quality: OutputQuality,
     ) -> list[str]:
-        try:
-            crf, audio_bitrate = self._VIDEO_PROFILES[quality]
-        except KeyError as error:
+        spec = output_spec(output_format)
+        if quality is OutputQuality.SOURCE:
             raise MovieError(
-                "Le MP4/M4V nécessite un profil high, balanced ou compact."
-            ) from error
+                f"Le {spec.label} nécessite un profil high, balanced ou compact."
+            )
         command = self._base_command(source)
-        command.extend(("-map", "0:v:0", "-map", "0:a?"))
         command.extend(
             (
-                "-map_metadata", "0", "-map_chapters", "0",
-                "-c:v:0", "libx264", "-preset:v:0", "medium",
-                "-crf:v:0", str(crf), "-pix_fmt:v:0", "yuv420p",
-                "-c:a", "aac", "-b:a", audio_bitrate,
-                "-movflags", "+faststart",
+                "-map",
+                "0:V:0",
+                "-map",
+                "0:a?",
+                "-map_metadata",
+                "0",
+                "-map_chapters",
+                "0" if spec.preserves_chapters else "-1",
             )
         )
+        if spec.encoding is EncodingFamily.H264:
+            self._add_h264_options(command, output_format, quality)
+        elif spec.encoding is EncodingFamily.VP9:
+            crf, audio_bitrate = self._profile(self._VP9_PROFILES, quality, spec.label)
+            command.extend(
+                (
+                    "-c:v:0",
+                    "libvpx-vp9",
+                    "-crf:v:0",
+                    str(crf),
+                    "-b:v:0",
+                    "0",
+                    "-row-mt:v:0",
+                    "1",
+                    "-pix_fmt:v:0",
+                    "yuv420p",
+                    "-c:a",
+                    "libopus",
+                    "-b:a",
+                    audio_bitrate,
+                )
+            )
+        elif spec.encoding in {
+            EncodingFamily.MPEG4,
+            EncodingFamily.MPEG2,
+            EncodingFamily.WMV2,
+            EncodingFamily.FLV1,
+        }:
+            self._add_legacy_options(command, spec.encoding, quality, spec.label)
+        else:  # pragma: no cover - le catalogue est exhaustif et testé
+            raise MovieError(f"Encodage non pris en charge : {spec.encoding}")
         return command
+
+    def _add_h264_options(
+        self,
+        command: list[str],
+        output_format: OutputFormat,
+        quality: OutputQuality,
+    ) -> None:
+        spec = output_spec(output_format)
+        crf, audio_bitrate = self._profile(
+            self._VIDEO_PROFILES,
+            quality,
+            spec.label,
+        )
+        command.extend(
+            (
+                "-c:v:0",
+                "libx264",
+                "-preset:v:0",
+                "medium",
+                "-crf:v:0",
+                str(crf),
+                "-pix_fmt:v:0",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                audio_bitrate,
+            )
+        )
+        if output_format in {OutputFormat.TS, OutputFormat.MTS}:
+            command.extend(("-f", "mpegts"))
+        else:
+            command.extend(("-movflags", "+faststart"))
+
+    def _add_legacy_options(
+        self,
+        command: list[str],
+        encoding: EncodingFamily,
+        quality: OutputQuality,
+        label: str,
+    ) -> None:
+        video_quality, audio_bitrate = self._profile(
+            self._LEGACY_PROFILES,
+            quality,
+            label,
+        )
+        video_codec, audio_codec = {
+            EncodingFamily.MPEG4: ("mpeg4", "libmp3lame"),
+            EncodingFamily.MPEG2: ("mpeg2video", "mp2"),
+            EncodingFamily.WMV2: ("wmv2", "wmav2"),
+            EncodingFamily.FLV1: ("flv", "libmp3lame"),
+        }[encoding]
+        command.extend(
+            (
+                "-c:v:0",
+                video_codec,
+                "-q:v:0",
+                str(video_quality),
+                "-pix_fmt:v:0",
+                "yuv420p",
+                "-c:a",
+                audio_codec,
+                "-b:a",
+                audio_bitrate,
+            )
+        )
+
+    @staticmethod
+    def _profile(
+        profiles: dict[OutputQuality, tuple[int, str]],
+        quality: OutputQuality,
+        label: str,
+    ) -> tuple[int, str]:
+        try:
+            return profiles[quality]
+        except KeyError as error:
+            raise MovieError(
+                f"Le {label} nécessite un profil high, balanced ou compact."
+            ) from error

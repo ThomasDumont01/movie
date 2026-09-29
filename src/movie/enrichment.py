@@ -47,7 +47,9 @@ class MediaTagger:
         elif suffix in {".mp4", ".m4v"}:
             command = self._mp4_command(source, metadata, artwork, source_media)
         else:  # pragma: no cover - le plan refuse le format avant l'exécution
-            raise MovieError("Les métadonnées sont prises en charge pour MKV, MP4 et M4V.")
+            raise MovieError(
+                "Les métadonnées sont prises en charge pour MKV, MP4 et M4V."
+            )
 
         command.extend(("-progress", "pipe:1", "-nostats", "-y", str(destination)))
         return run_ffmpeg(
@@ -137,9 +139,13 @@ class MediaTagger:
         if artwork is None:
             command.extend(("-map", "0"))
             return source_media.streams
-        mapped = tuple(stream for stream in source_media.streams if not stream.is_artwork)
+        mapped = tuple(
+            stream for stream in source_media.streams if not stream.is_artwork
+        )
         if any(stream.stream_id is None for stream in mapped):
-            raise MovieError("Impossible d'identifier toutes les pistes du fichier source.")
+            raise MovieError(
+                "Impossible d'identifier toutes les pistes du fichier source."
+            )
         for stream in mapped:
             command.extend(("-map", f"0:{stream.stream_id}"))
         return mapped

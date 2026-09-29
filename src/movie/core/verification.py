@@ -13,6 +13,7 @@ from movie.core.models import (
     OutputFormat,
     ProbedMedia,
 )
+from movie.formats import OutputFormatSpec, output_spec, requires_video
 
 
 def validate_source(media: ProbedMedia) -> None:
@@ -51,7 +52,7 @@ def validate_extracted_title(
         )
         if expected_kinds["audio"] and not actual_kinds["audio"]:
             raise MovieError(
-                "Le DVD contient de l'audio, mais le MKV n'a aucune piste audio. "
+                "Le support contient de l'audio, mais le MKV n'a aucune piste audio. "
                 "Rien n'a été publié."
             )
         missing_kinds = expected_kinds - actual_kinds
@@ -84,14 +85,14 @@ def validate_extracted_title(
                 for (kind, language), count in sorted(missing_languages.items())
             )
             warnings.append(
-                "Certaines étiquettes de langue annoncées par le DVD ne sont pas "
+                "Certaines étiquettes de langue annoncées par le support ne sont pas "
                 f"restituées à l'identique ({details}). Les pistes restent lisibles."
             )
     if title.chapter_count and media.chapter_count < title.chapter_count:
         warnings.append(
             "L'extraction contient "
             f"{media.chapter_count} chapitre(s), contre {title.chapter_count} annoncé(s) "
-            "par le DVD. Les pistes vidéo et audio ont bien été vérifiées."
+            "par le support. Les pistes vidéo et audio ont bien été vérifiées."
         )
     if media.duration_seconds is not None and media.duration_seconds <= 0:
         raise MovieError(
@@ -108,12 +109,12 @@ def validate_extracted_title(
         warning_difference = max(1.0, title.duration_seconds * 0.005)
         if difference > blocking_difference:
             raise MovieError(
-                "La durée du MKV diffère de plus de 5 % de celle du titre DVD ; "
+                "La durée du MKV diffère de plus de 5 % de celle du titre source ; "
                 "le fichier semble tronqué et n'a pas été publié."
             )
         if difference > warning_difference:
             warnings.append(
-                "La navigation du DVD annonce "
+                "La navigation du support annonce "
                 f"{title.duration_seconds:.1f} s, tandis que le flux extrait dure "
                 f"{media.duration_seconds:.1f} s. Cet écart non bloquant est courant "
                 "sur certains titres très courts ou images fixes."
@@ -128,7 +129,7 @@ def validate_conversion_request(
     """Valide les flux nécessaires au format demandé."""
 
     videos = tuple(stream for stream in source.streams if stream.kind == "video")
-    if plan.output_format in {OutputFormat.MP4, OutputFormat.M4V} and not videos:
+    if requires_video(plan.output_format) and not videos:
         raise MovieError(
             f"La conversion {plan.output_format.value.upper()} nécessite "
             "une piste vidéo."
@@ -144,10 +145,11 @@ def validate_conversion(
 
     if plan.output_format is OutputFormat.MKV:
         return _validate_mkv(source, output)
+    spec = output_spec(plan.output_format)
     return _validate_video_output(
         source,
         output,
-        label=plan.output_format.value.upper(),
+        spec=spec,
     )
 
 
@@ -258,8 +260,12 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
     output_streams = Counter(stream.kind for stream in output.streams)
     missing = source_streams - output_streams
     if missing:
-        details = ", ".join(f"{count}× {kind}" for kind, count in sorted(missing.items()))
-        raise MovieError(f"Le MKV a perdu des pistes ({details}) ; rien n'a été publié.")
+        details = ", ".join(
+            f"{count}× {kind}" for kind, count in sorted(missing.items())
+        )
+        raise MovieError(
+            f"Le MKV a perdu des pistes ({details}) ; rien n'a été publié."
+        )
     expected_details = Counter(
         (stream.kind, stream.language, stream.codec)
         for stream in source.streams
@@ -284,21 +290,33 @@ def _validate_video_output(
     source: ProbedMedia,
     output: ProbedMedia,
     *,
-    label: str,
+    spec: OutputFormatSpec,
 ) -> tuple[str, ...]:
+    label = spec.label
     videos = tuple(stream for stream in output.streams if stream.kind == "video")
     audios = tuple(stream for stream in output.streams if stream.kind == "audio")
     source_audios = tuple(stream for stream in source.streams if stream.kind == "audio")
-    if not videos or videos[0].codec != "h264":
-        raise MovieError(f"Le {label} vérifié ne contient pas de vidéo H.264.")
+    if not videos or videos[0].codec != spec.video_codec:
+        raise MovieError(
+            f"Le {label} vérifié ne contient pas de vidéo {spec.video_codec}."
+        )
     if len(audios) < len(source_audios):
         raise MovieError(f"Le {label} a perdu une ou plusieurs pistes audio.")
-    if any(stream.codec != "aac" for stream in audios):
-        raise MovieError(f"Toutes les pistes audio du {label} doivent être en AAC.")
-    _validate_languages(source_audios, audios, label)
+    if any(stream.codec != spec.audio_codec for stream in audios):
+        raise MovieError(
+            f"Toutes les pistes audio du {label} doivent être en {spec.audio_codec}."
+        )
+    missing_languages = _missing_languages(source_audios, audios)
+    if missing_languages and spec.preserves_audio_languages:
+        raise MovieError(f"Le {label} a perdu la langue d'une piste audio.")
     _validate_duration(source, output, label)
 
     warnings: list[str] = []
+    if missing_languages:
+        warnings.append(
+            f"Le conteneur {label} ne conserve pas toujours les étiquettes de langue "
+            "des pistes audio ; les pistes elles-mêmes ont bien été vérifiées."
+        )
     subtitle_count = sum(stream.kind == "subtitle" for stream in source.streams)
     if subtitle_count:
         warnings.append(
@@ -307,22 +325,25 @@ def _validate_video_output(
             "utilise le MKV pour les conserver sans compromis."
         )
     if source.chapter_count and output.chapter_count < source.chapter_count:
-        warnings.append(
-            f"Le {label} contient {output.chapter_count} chapitre(s), contre "
-            f"{source.chapter_count} dans la source."
-        )
+        if spec.preserves_chapters:
+            warnings.append(
+                f"Le {label} contient {output.chapter_count} chapitre(s), contre "
+                f"{source.chapter_count} dans la source."
+            )
+        else:
+            warnings.append(
+                f"Le conteneur {label} ne conserve pas les chapitres de la source."
+            )
     return tuple(warnings)
 
 
-def _validate_languages(
+def _missing_languages(
     source: tuple[MediaStream, ...],
     output: tuple[MediaStream, ...],
-    label: str,
-) -> None:
+) -> bool:
     expected = Counter(stream.language for stream in source if stream.language)
     actual = Counter(stream.language for stream in output if stream.language)
-    if expected - actual:
-        raise MovieError(f"Le {label} a perdu la langue d'une piste audio.")
+    return bool(expected - actual)
 
 
 def _validate_duration(source: ProbedMedia, output: ProbedMedia, label: str) -> None:
