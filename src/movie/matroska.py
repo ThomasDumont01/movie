@@ -174,10 +174,29 @@ class MatroskaEditor:
             )
         except OSError as error:
             raise MovieError("Impossible de lancer mkvextract.") from error
-        if result.returncode != 0 or not output.is_file():
+        if result.returncode != 0:
             details = (result.stderr or result.stdout).strip()
             suffix = f" : {details[-1_000:]}" if details else "."
             raise MovieError("Impossible de lire les métadonnées du MKV" + suffix)
+        try:
+            output_is_empty = not output.is_file() or output.stat().st_size == 0
+        except OSError as error:
+            raise MovieError(
+                "Impossible de préparer les métadonnées du MKV."
+            ) from error
+        if output_is_empty:
+            # mkvextract réussit sans créer de fichier lorsqu'un MKV ne contient
+            # encore aucun tag global. C'est le cas normal d'un premier tag.
+            try:
+                ElementTree.ElementTree(ElementTree.Element("Tags")).write(
+                    output,
+                    encoding="utf-8",
+                    xml_declaration=True,
+                )
+            except OSError as error:
+                raise MovieError(
+                    "Impossible de préparer les métadonnées du MKV."
+                ) from error
 
     @staticmethod
     def _identify_attachments(executable: str, source: Path) -> tuple[_Attachment, ...]:

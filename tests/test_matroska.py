@@ -3,15 +3,44 @@
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CompletedProcess
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 from xml.etree import ElementTree
 
-from movie.core.models import MovieMetadata
-from movie.matroska import _Attachment, _update_global_tags
+from movie.core.models import MovieError, MovieMetadata
+from movie.matroska import MatroskaEditor, _Attachment, _update_global_tags
 
 
 class MatroskaTagTests(TestCase):
+    @patch("movie.matroska.subprocess.run")
+    def test_missing_extracted_tags_initializes_an_empty_document(self, run) -> None:
+        run.return_value = CompletedProcess([], 0, "", "")
+        with TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "tags.xml"
+
+            MatroskaEditor._extract_global_tags(
+                "mkvextract",
+                Path("film.mkv"),
+                output,
+            )
+
+            self.assertEqual(ElementTree.parse(output).getroot().tag, "Tags")
+
+    @patch("movie.matroska.subprocess.run")
+    def test_failed_tag_extraction_is_still_reported(self, run) -> None:
+        run.return_value = CompletedProcess([], 2, "", "lecture impossible")
+        with TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "tags.xml"
+
+            with self.assertRaisesRegex(MovieError, "lecture impossible"):
+                MatroskaEditor._extract_global_tags(
+                    "mkvextract",
+                    Path("film.mkv"),
+                    output,
+                )
+
     def test_managed_tags_are_replaced_without_losing_unknown_tags(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             tags = Path(temporary_directory) / "tags.xml"
