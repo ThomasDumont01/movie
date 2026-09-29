@@ -830,16 +830,13 @@ def _resolve_output_directory(
 def _resolve_conversion_settings(
     config: MovieConfig,
 ) -> tuple[OutputFormat, OutputQuality]:
-    if config.auto_run:
-        selected_format = config.convert_format
-    else:
-        selected_format = OutputFormat(
-            _prompt_choice(
-                "Format de conversion",
-                choices=output_format_choices(),
-                default=config.convert_format.value,
-            )
+    selected_format = OutputFormat(
+        _prompt_choice(
+            "Format de conversion",
+            choices=output_format_choices(),
+            default=config.convert_format.value,
         )
+    )
 
     if output_spec(selected_format).copies_source:
         selected_quality = OutputQuality.SOURCE

@@ -1,5 +1,10 @@
 # Historique des versions
 
+## Non publié
+
+- `convert` demande désormais toujours explicitement le format de sortie, même
+  avec `auto_run` ; la configuration reste la valeur proposée par défaut.
+
 ## 0.3.0 — 2026-09-29
 
 - `scan` et `rip` généralisés aux DVD, Blu-ray et Blu-ray UHD ouverts par

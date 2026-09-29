@@ -20,6 +20,7 @@ from movie.__main__ import (
     _prompt_optional_path,
     _prompt_path,
     _prompt_yes_no,
+    _resolve_conversion_settings,
     _resolve_output_directory,
     main,
 )
@@ -63,6 +64,23 @@ class TitlePromptTests(TestCase):
 
 
 class InteractivePromptTests(TestCase):
+    @patch("builtins.input", return_value="mkv")
+    def test_convert_always_asks_for_the_output_format_even_in_auto_run(
+        self,
+        prompt: MagicMock,
+    ) -> None:
+        selected_format, selected_quality = _resolve_conversion_settings(
+            MovieConfig(
+                auto_run=True,
+                convert_format=OutputFormat.MP4,
+                convert_quality=OutputQuality.HIGH,
+            )
+        )
+
+        self.assertIs(selected_format, OutputFormat.MKV)
+        self.assertIs(selected_quality, OutputQuality.SOURCE)
+        prompt.assert_called_once()
+
     @patch("builtins.input", return_value="")
     def test_long_choice_list_is_rendered_on_separate_lines(
         self,
@@ -346,7 +364,7 @@ class CommandFlowTests(TestCase):
             output = StringIO()
 
             with (
-                patch("builtins.input", return_value=str(source)),
+                patch("builtins.input", side_effect=[str(source), "mp4"]),
                 redirect_stdout(output),
             ):
                 result = main(["convert"])
@@ -389,7 +407,7 @@ class CommandFlowTests(TestCase):
             errors = StringIO()
 
             with (
-                patch("builtins.input", return_value=str(source)),
+                patch("builtins.input", side_effect=[str(source), "m4v"]),
                 redirect_stdout(output),
                 redirect_stderr(errors),
             ):

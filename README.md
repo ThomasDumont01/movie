@@ -294,7 +294,9 @@ connus ;
 
 La configuration est enregistrée dans `~/.config/movie/config.json`. Même avec
 `auto_run`, Movie demande toujours une décision lorsqu'un titre de disque/ISO ou
-une fiche TMDB ne peut pas être choisi sans risque.
+une fiche TMDB ne peut pas être choisi sans risque. `convert` demande également
+toujours le format de sortie ; la configuration sert uniquement de proposition
+par défaut.
 
 ## Progression, erreurs et fichiers temporaires
 
