@@ -609,6 +609,15 @@ def _tag() -> int:
         f"  Informations : {'TMDB' if plan.metadata.source_url else 'saisie manuelle'}"
     )
     print(f"  Jaquette     : {'oui' if plan.metadata.has_artwork else 'non'}")
+    if plan.metadata.has_fanart:
+        fanart_status = (
+            "intégré au MKV"
+            if plan.source.suffix.casefold() == ".mkv"
+            else "non pris en charge par ce conteneur"
+        )
+    else:
+        fanart_status = "non"
+    print(f"  Arrière-plan : {fanart_status}")
     print("  Traitement   : copie des pistes, sans réencodage")
     print(
         "  Sécurité     : l'original reste intact tant que la vérification n'est pas finie"
@@ -649,12 +658,16 @@ def _manual_metadata(source: Path) -> MovieMetadata:
     summary = _prompt_optional_text("Description")
     genres = _prompt_genres()
     poster_path = _prompt_optional_existing_file("Jaquette locale JPEG, PNG ou WebP")
+    fanart_path = _prompt_optional_existing_file(
+        "Arrière-plan panoramique local JPEG, PNG ou WebP"
+    )
     return MovieMetadata(
         title=title,
         year=year,
         summary=summary,
         genres=genres,
         poster_path=poster_path,
+        fanart_path=fanart_path,
     )
 
 

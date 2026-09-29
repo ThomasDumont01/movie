@@ -82,9 +82,15 @@ def parse_movie_page(html: str, source_url: str) -> MovieMetadata:
     ) or parser.meta.get("og:description")
     genres = _genre_values(structured.get("genre")) if structured else ()
     image = _image_value(structured.get("image")) if structured else None
-    poster_url = image or parser.meta.get("og:image")
+    open_graph_images = parser.meta_values.get("og:image", [])
+    poster_url = image or (open_graph_images[0] if open_graph_images else None)
     if poster_url and urlsplit(poster_url).scheme != "https":
         poster_url = None
+    fanart_url = (
+        _original_tmdb_image_url(open_graph_images[1])
+        if len(open_graph_images) > 1
+        else None
+    )
 
     return MovieMetadata(
         title=title,
@@ -93,6 +99,7 @@ def parse_movie_page(html: str, source_url: str) -> MovieMetadata:
         genres=genres,
         source_url=source_url,
         poster_url=poster_url,
+        fanart_url=fanart_url,
     )
 
 
@@ -100,6 +107,7 @@ class _MetadataHtmlParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.meta: dict[str, str] = {}
+        self.meta_values: dict[str, list[str]] = {}
         self.structured_objects: list[Any] = []
         self._in_json_ld = False
         self._script_parts: list[str] = []
@@ -110,7 +118,9 @@ class _MetadataHtmlParser(HTMLParser):
             key = attributes.get("property") or attributes.get("name")
             content = attributes.get("content")
             if key and content:
-                self.meta[key.casefold()] = content
+                normalized_key = key.casefold()
+                self.meta[normalized_key] = content
+                self.meta_values.setdefault(normalized_key, []).append(content)
         elif (
             tag.casefold() == "script"
             and attributes.get("type", "").casefold() == "application/ld+json"
@@ -206,6 +216,20 @@ def _image_value(value: Any) -> str | None:
     if isinstance(value, dict):
         return _text_value(value.get("url") or value.get("contentUrl"))
     return None
+
+
+def _original_tmdb_image_url(url: str) -> str | None:
+    """Demande l'image TMDB originale lorsque la page expose une miniature."""
+
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in {"image.tmdb.org", "media.themoviedb.org"}
+        or not re.fullmatch(r"/t/p/[^/]+/[^/]+", parsed.path)
+    ):
+        return None
+    filename = parsed.path.rsplit("/", 1)[-1]
+    return f"https://media.themoviedb.org/t/p/original/{filename}"
 
 
 def _extract_year(value: str) -> int | None:

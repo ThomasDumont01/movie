@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from movie.core.convert import ConversionService, build_convert_plan
+from movie.core.convert import ConversionService, _ensure_free_space, build_convert_plan
 from movie.core.models import (
     DiscScan,
     DiscTitle,
@@ -144,6 +145,7 @@ class ConversionExecutionTests(TestCase):
             ).execute(plan, on_progress=updates.append)
 
             self.assertEqual(result.output.read_bytes(), b"converted")
+            self.assertEqual(result.media.path, result.output)
             self.assertEqual(result.media.streams[0].codec, "h264")
             self.assertIn("sous-titres", result.warnings[0])
             totals = [
@@ -243,6 +245,79 @@ class ConversionExecutionTests(TestCase):
                     _FakeMakeMkv(), _FakeProbe(), _FailingConverter()
                 ).execute(plan)
 
+            self.assertFalse(plan.output.exists())
+
+    def test_conversion_uses_local_staging(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source_directory = directory / "nas"
+            source_directory.mkdir()
+            source = source_directory / "film.mkv"
+            source.write_bytes(b"source")
+            converter = MagicMock(wraps=_FakeConverter())
+
+            ConversionService(_FakeMakeMkv(), _FakeProbe(), converter).execute(
+                build_convert_plan(source, "mp4")
+            )
+
+            staged_output = converter.convert.call_args.args[1]
+            self.assertEqual(
+                staged_output.parent.parent,
+                Path(tempfile.gettempdir()).resolve(),
+            )
+            self.assertNotEqual(staged_output.parent, source.parent)
+
+    @patch("movie.core.convert.ensure_free_space")
+    def test_conversion_checks_destination_and_local_staging_space(
+        self,
+        check_space: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"source")
+            plan = build_convert_plan(source, "mp4")
+            staging_root = MagicMock(spec=Path)
+            staging_root.stat.return_value.st_dev = plan.output.parent.stat().st_dev + 1
+
+            _ensure_free_space(plan, staging_root)
+
+            self.assertEqual(check_space.call_count, 2)
+            self.assertEqual(check_space.call_args_list[0].args[0], plan.output.parent)
+            self.assertIs(check_space.call_args_list[1].args[0], staging_root)
+
+    def test_verified_conversion_is_preserved_when_publication_fails(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "film.mkv"
+            source.write_bytes(b"source")
+            plan = build_convert_plan(source, "mp4")
+
+            with (
+                patch(
+                    "movie.core.convert.tempfile.gettempdir",
+                    return_value=temporary_directory,
+                ),
+                patch(
+                    "movie.core.convert.publish_without_overwrite",
+                    side_effect=MovieError("NAS indisponible"),
+                ),
+                self.assertRaisesRegex(
+                    MovieError,
+                    "fichier local vérifié a été conservé",
+                ),
+            ):
+                ConversionService(
+                    _FakeMakeMkv(),
+                    _FakeProbe(),
+                    _FakeConverter(),
+                ).execute(plan)
+
+            recovery_directories = list(root.glob("movie-convert-*"))
+            self.assertEqual(len(recovery_directories), 1)
+            self.assertEqual(
+                (recovery_directories[0] / ".movie-output.mp4").read_bytes(),
+                b"converted",
+            )
             self.assertFalse(plan.output.exists())
 
 

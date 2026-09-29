@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import stat
 import tempfile
@@ -32,6 +31,7 @@ from movie.core.workflow import (
     phase_callback,
     prepare_destination,
     publish_without_overwrite,
+    replace_with_verified_file,
     report_stage,
 )
 from movie.formats import taggable_format_names, taggable_suffixes
@@ -91,6 +91,8 @@ def build_tag_plan(
         raise MovieError("L'année doit être comprise entre 1 et 9999.")
     if metadata.poster_url and metadata.poster_path:
         raise MovieError("Choisis une jaquette distante ou locale, pas les deux.")
+    if metadata.fanart_url and metadata.fanart_path:
+        raise MovieError("Choisis un arrière-plan distant ou local, pas les deux.")
 
     normalized = replace(
         metadata,
@@ -102,6 +104,11 @@ def build_tag_plan(
         poster_path=(
             metadata.poster_path.expanduser()
             if metadata.poster_path is not None
+            else None
+        ),
+        fanart_path=(
+            metadata.fanart_path.expanduser()
+            if metadata.fanart_path is not None
             else None
         ),
     )
@@ -126,16 +133,27 @@ class TagService:
     ) -> TagResult:
         source_media = self.probe.probe(plan.source)
         validate_source(source_media)
-        _ensure_free_space(plan.source)
+        staging_root = Path(tempfile.gettempdir()).resolve()
+        _ensure_free_space(plan.source, staging_root)
         if plan.output != plan.source:
             prepare_destination(plan.output)
 
         source_mode = stat.S_IMODE(plan.source.stat().st_mode)
         with tempfile.TemporaryDirectory(
-            prefix=".movie-tag-", dir=plan.source.parent
+            prefix="movie-tag-", dir=staging_root
         ) as work_directory:
             staging = Path(work_directory)
             staged_file = staging / f"tagged{plan.source.suffix.casefold()}"
+            warnings = (
+                [
+                    (
+                        "L'arrière-plan panoramique ne peut être intégré de manière "
+                        "fiable que dans un MKV ; la jaquette reste intégrée."
+                    )
+                ]
+                if plan.metadata.has_fanart and plan.source.suffix.casefold() != ".mkv"
+                else []
+            )
             report_stage(
                 on_progress,
                 "Préparation des métadonnées",
@@ -147,13 +165,13 @@ class TagService:
                 staged_file,
                 plan.metadata,
                 source_media=source_media,
-                on_progress=phase_callback(on_progress, start=0.02, end=0.94),
+                on_progress=phase_callback(on_progress, start=0.02, end=0.88),
             )
             report_stage(
                 on_progress,
                 "Vérification du fichier enrichi",
                 0.0,
-                total_fraction=0.94,
+                total_fraction=0.88,
             )
             output_media = self.probe.probe(staged_file)
             validate_preserved_media(
@@ -166,7 +184,7 @@ class TagService:
                 on_progress,
                 "Vérification du fichier enrichi",
                 1.0,
-                total_fraction=0.98,
+                total_fraction=0.90,
             )
             try:
                 staged_file.chmod(source_mode)
@@ -174,7 +192,29 @@ class TagService:
                 raise MovieError(
                     "Impossible de préserver les permissions du fichier d'origine."
                 ) from error
-            _publish_tagged_file(staged_file, plan.source, plan.output)
+            report_stage(
+                on_progress,
+                "Publication du fichier enrichi",
+                0.0,
+                total_fraction=0.90,
+            )
+
+            def report_copy_progress(fraction: float) -> None:
+                report_stage(
+                    on_progress,
+                    "Copie vers la destination",
+                    fraction,
+                    total_fraction=0.90 + 0.08 * fraction,
+                )
+
+            _publish_tagged_file(
+                staged_file,
+                plan.source,
+                plan.output,
+                on_copy_progress=(
+                    report_copy_progress if on_progress is not None else None
+                ),
+            )
             report_stage(
                 on_progress,
                 "Publication des métadonnées",
@@ -185,16 +225,23 @@ class TagService:
         return TagResult(
             output=plan.output,
             media=replace(output_media, path=plan.output),
-            warnings=(),
+            warnings=tuple(warnings),
         )
 
 
-def _ensure_free_space(source: Path) -> None:
+def _ensure_free_space(source: Path, staging_root: Path) -> None:
+    required = tag_required_bytes(source)
     ensure_free_space(
         source.parent,
-        tag_required_bytes(source),
+        required,
         operation="modifier ce fichier sans risque",
     )
+    if staging_root.stat().st_dev != source.parent.stat().st_dev:
+        ensure_free_space(
+            staging_root,
+            required,
+            operation="la copie temporaire locale du média",
+        )
 
 
 def _tagged_path(source: Path, metadata: MovieMetadata) -> Path:
@@ -222,17 +269,26 @@ def _bounded_filename(title: str, extension: str) -> str:
     return f"{bounded_title}{extension}"
 
 
-def _publish_tagged_file(staged_file: Path, source: Path, output: Path) -> None:
+def _publish_tagged_file(
+    staged_file: Path,
+    source: Path,
+    output: Path,
+    *,
+    on_copy_progress: Callable[[float], None] | None = None,
+) -> None:
     if output == source:
-        try:
-            os.replace(staged_file, source)
-        except OSError as error:
-            raise MovieError(
-                "Impossible de remplacer le fichier d'origine en toute sécurité."
-            ) from error
+        replace_with_verified_file(
+            staged_file,
+            source,
+            on_copy_progress=on_copy_progress,
+        )
         return
 
-    publish_without_overwrite(staged_file, output)
+    publish_without_overwrite(
+        staged_file,
+        output,
+        on_copy_progress=on_copy_progress,
+    )
     try:
         source.unlink()
     except OSError as error:

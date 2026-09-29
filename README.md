@@ -227,7 +227,9 @@ https://www.themoviedb.org/movie/181812-star-wars-the-rise-of-skywalker
 
 Movie affiche le titre, l'année, les genres et le résumé avant confirmation. Il
 intègre ensuite le titre, l'année, le résumé, les genres, le lien TMDB et la
-jaquette. Aucune clé API et aucun compte ne sont nécessaires.
+jaquette. Pour un MKV, l'image panoramique officielle est également jointe à
+l'intérieur du conteneur sous le nom `fanart`, sans ajouter de fichier au
+dossier. Aucune clé API et aucun compte ne sont nécessaires.
 
 Le nom du fichier est normalisé en minuscules sous la forme
 `titre_normalisé.extension`. Les espaces, accents et signes de ponctuation
@@ -246,7 +248,8 @@ Choisis `manuel`, puis renseigne :
 - l'année, facultative ;
 - la description, facultative ;
 - les genres, facultatifs ;
-- une jaquette locale JPEG, PNG ou WebP, facultative.
+- une jaquette locale JPEG, PNG ou WebP, facultative ;
+- un arrière-plan panoramique local JPEG, PNG ou WebP, facultatif.
 
 Le fichier reçoit le même nom normalisé. Par exemple, `La Clusaz Noël` devient
 `la_clusaz_noel.mkv` ; son année reste enregistrée dans les métadonnées. Les
@@ -255,11 +258,15 @@ permet aussi de retirer une ancienne identification TMDB.
 
 ### Sécurité de `tag`
 
-Movie écrit une copie temporaire sur le même volume, vérifie toutes les pistes,
-les informations et la jaquette, publie le nom normalisé sans écraser un fichier
-existant, puis retire l'ancien nom. En cas d'erreur ou d'interruption,
-l'original reste intact. Une nouvelle jaquette remplace l'ancienne sans
-supprimer les autres pièces jointes utiles du MKV.
+Movie écrit et vérifie la copie temporaire sur le disque local, puis la publie
+sur la destination avec la même protection SMB que `rip`. Il vérifie toutes les
+pistes, les informations et la jaquette, publie le nom normalisé sans écraser un
+fichier existant, puis retire l'ancien nom. En cas d'erreur ou d'interruption,
+l'original reste intact. Les nouvelles illustrations remplacent les anciennes
+sans modifier les pistes vidéo, audio, sous-titres, chapitres ou autres pièces
+jointes du MKV. Le fanart est intégré au MKV comme seconde illustration. MP4 et
+M4V conservent leur jaquette intégrée, mais ne disposent pas d'un rôle
+panoramique suffisamment portable pour que Movie y annonce un fanart fiable.
 
 ## Configuration
 
@@ -353,7 +360,7 @@ uv run pyright
 
 État vérifié le 29 septembre 2026 pour la version 0.3.0 :
 
-- 166 tests et 85 sous-tests réussissent ;
+- 183 tests et 85 sous-tests réussissent ;
 - la couverture automatisée atteint 86 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;
@@ -384,7 +391,7 @@ uv run pyright
 | --- | --- | --- |
 | MakeMKV reste nécessaire | Movie pilote MakeMKV ; il ne réimplémente ni la lecture optique ni le déchiffrement. Si MakeMKV refuse un disque, Movie ne peut pas le forcer. | Vérifier d'abord le disque dans MakeMKV et relancer `doctor`. |
 | Compatibilité Blu-ray/UHD dépendante du matériel | Movie accepte ces supports, mais ne peut pas ajouter à un lecteur les capacités optiques ou le firmware requis par MakeMKV. Certains UHD nécessitent un lecteur spécifiquement compatible. | Vérifier le support avec `movie scan` ; si MakeMKV ne peut pas l'ouvrir, utiliser un lecteur/firmware compatible. |
-| `rip` utilise un espace temporaire local | Le MKV est vérifié sur le Mac avant sa copie vers le NAS ; il faut donc disposer localement d'un espace proche de la taille annoncée du titre. | Libérer de l'espace sur le Mac avant un gros Blu-ray/UHD ; Movie contrôle cette capacité avant de lancer le lecteur. |
+| Les opérations utilisent un espace temporaire local | `rip`, `convert` et `tag` vérifient leur résultat sur le Mac avant sa copie vers le NAS ; il faut donc disposer localement d'un espace adapté au résultat. | Libérer de l'espace sur le Mac avant une grosse opération ; Movie contrôle cette capacité avant de commencer. |
 | Pas de CD audio ni de disque de données | MakeMKV expose des titres vidéo, pas les pistes d'un CD audio ni les fichiers d'un disque de données. | Employer un outil d'extraction audio ou une copie de fichiers adaptée à ces supports. |
 | Un titre est extrait à la fois | Un disque de série avec plusieurs épisodes demande une exécution par épisode. | Relancer `rip` ou `convert` pour chaque titre voulu. |
 | Les menus ne sont pas conservés | Un fichier vidéo contient le film et ses pistes, pas l'interface interactive du disque. | Conserver une image complète du disque si les menus sont indispensables. |

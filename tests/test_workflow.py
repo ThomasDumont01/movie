@@ -9,7 +9,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from movie.core.models import MovieError, OutputExistsError
-from movie.core.workflow import publish_without_overwrite
+from movie.core.workflow import publish_without_overwrite, replace_with_verified_file
 
 
 class PublicationTests(TestCase):
@@ -107,6 +107,53 @@ class PublicationTests(TestCase):
                 list(destination.parent.glob(".*.movie-copy")),
                 [],
             )
+
+    @patch("movie.core.workflow._same_filesystem", return_value=False)
+    def test_cross_volume_replacement_is_copied_then_atomic(
+        self,
+        _same_filesystem: object,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "staged.mkv"
+            destination = directory / "destination" / "film.mkv"
+            destination.parent.mkdir()
+            source.write_bytes(b"verified")
+            destination.write_bytes(b"original")
+            progress: list[float] = []
+
+            replace_with_verified_file(
+                source,
+                destination,
+                on_copy_progress=progress.append,
+            )
+
+            self.assertEqual(destination.read_bytes(), b"verified")
+            self.assertEqual(source.read_bytes(), b"verified")
+            self.assertEqual(progress[-1], 1.0)
+            self.assertEqual(list(destination.parent.glob(".*.movie-copy")), [])
+
+    @patch("movie.core.workflow._same_filesystem", return_value=False)
+    @patch("movie.core.workflow.os.replace", side_effect=PermissionError("denied"))
+    def test_cross_volume_replacement_failure_preserves_original(
+        self,
+        _replace: object,
+        _same_filesystem: object,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "staged.mkv"
+            destination = directory / "destination" / "film.mkv"
+            destination.parent.mkdir()
+            source.write_bytes(b"verified")
+            destination.write_bytes(b"original")
+
+            with self.assertRaisesRegex(MovieError, "remplacer le fichier"):
+                replace_with_verified_file(source, destination)
+
+            self.assertEqual(source.read_bytes(), b"verified")
+            self.assertEqual(destination.read_bytes(), b"original")
+            self.assertEqual(list(destination.parent.glob(".*.movie-copy")), [])
 
     @patch("movie.core.workflow._same_filesystem", return_value=False)
     @patch(

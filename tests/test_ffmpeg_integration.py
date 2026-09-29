@@ -102,10 +102,12 @@ class FfmpegIntegrationTests(TestCase):
             self.assertTrue(output.is_file())
             self.assertIn("sous-titre", "\n".join(result.warnings))
 
+    @patch("movie.enrichment.prepare_fanart")
     @patch("movie.enrichment.prepare_artwork")
     def test_real_remux_preserves_video_and_embeds_metadata_and_cover(
         self,
         prepare_artwork: MagicMock,
+        prepare_fanart: MagicMock,
     ) -> None:
         assert FFMPEG is not None
         assert FFPROBE is not None
@@ -120,7 +122,10 @@ class FfmpegIntegrationTests(TestCase):
                     "AAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
                 )
             )
+            fanart = directory / "fanart.png"
+            fanart.write_bytes(poster.read_bytes())
             prepare_artwork.return_value = (poster, "image/png")
+            prepare_fanart.side_effect = (fanart, None)
             generated = subprocess.run(
                 [
                     FFMPEG,
@@ -146,6 +151,7 @@ class FfmpegIntegrationTests(TestCase):
                 genres=("Test",),
                 source_url="https://www.themoviedb.org/movie/1-test",
                 poster_url="https://image.tmdb.org/poster.png",
+                fanart_url="https://image.tmdb.org/fanart.png",
             )
 
             source_media = MediaProbe(FFPROBE).probe(source)
@@ -160,6 +166,7 @@ class FfmpegIntegrationTests(TestCase):
             tags = {key.casefold(): value for key, value in media.format_tags}
             self.assertIn("video", media.stream_types)
             self.assertIn("attachment", media.stream_types)
+            self.assertEqual(media.stream_types.count("attachment"), 2)
             self.assertEqual(tags.get("title"), metadata.title)
 
             retagged = directory / "retagged.mkv"

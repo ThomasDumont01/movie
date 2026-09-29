@@ -113,6 +113,43 @@ class MetadataParserTests(TestCase):
         )
         self.assertIsNone(metadata.poster_url)
 
+    def test_tmdb_second_open_graph_image_is_the_original_fanart(self) -> None:
+        page = """
+        <meta property="og:title" content="Film">
+        <meta property="og:image"
+              content="https://media.themoviedb.org/t/p/w500/poster.jpg">
+        <meta property="og:image"
+              content="https://media.themoviedb.org/t/p/w780/backdrop.jpg">
+        """
+
+        metadata = parse_movie_page(
+            page,
+            "https://www.themoviedb.org/movie/3-film",
+        )
+
+        self.assertEqual(
+            metadata.poster_url,
+            "https://media.themoviedb.org/t/p/w500/poster.jpg",
+        )
+        self.assertEqual(
+            metadata.fanart_url,
+            "https://media.themoviedb.org/t/p/original/backdrop.jpg",
+        )
+
+    def test_non_tmdb_secondary_image_is_not_accepted_as_fanart(self) -> None:
+        page = """
+        <meta property="og:title" content="Film">
+        <meta property="og:image" content="https://image.example/poster.jpg">
+        <meta property="og:image" content="https://image.example/backdrop.jpg">
+        """
+
+        metadata = parse_movie_page(
+            page,
+            "https://www.themoviedb.org/movie/3-film",
+        )
+
+        self.assertIsNone(metadata.fanart_url)
+
 
 class MetadataClientTests(TestCase):
     @patch("movie.metadata.urlopen")

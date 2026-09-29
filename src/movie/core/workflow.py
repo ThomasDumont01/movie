@@ -53,6 +53,38 @@ def publish_without_overwrite(
     _publish_same_filesystem(staged_file, destination)
 
 
+def replace_with_verified_file(
+    staged_file: Path,
+    destination: Path,
+    *,
+    on_copy_progress: Callable[[float], None] | None = None,
+) -> None:
+    """Remplace atomiquement une destination par un fichier déjà vérifié."""
+
+    if _same_filesystem(staged_file, destination.parent):
+        try:
+            os.replace(staged_file, destination)
+        except OSError as error:
+            raise MovieError(
+                "Impossible de remplacer le fichier d'origine en toute sécurité."
+            ) from error
+        return
+
+    temporary = _copy_to_destination_volume(
+        staged_file,
+        destination,
+        on_progress=on_copy_progress,
+    )
+    try:
+        os.replace(temporary, destination)
+    except OSError as error:
+        raise MovieError(
+            "Impossible de remplacer le fichier d'origine en toute sécurité."
+        ) from error
+    finally:
+        _unlink_temporary(temporary)
+
+
 def _publish_same_filesystem(staged_file: Path, destination: Path) -> None:
     if sys.platform == "darwin":
         try:
@@ -102,6 +134,30 @@ def _copy_then_publish(
 ) -> None:
     """Copie vers le volume cible avant une publication atomique locale."""
 
+    temporary = _copy_to_destination_volume(
+        source,
+        destination,
+        on_progress=on_progress,
+    )
+    try:
+        _publish_same_filesystem(temporary, destination)
+    except MovieError:
+        raise
+    except OSError as error:
+        raise MovieError(
+            "La copie du fichier vérifié vers la destination a échoué ; "
+            "aucun fichier final n'a été créé."
+        ) from error
+    finally:
+        _unlink_temporary(temporary)
+
+
+def _copy_to_destination_volume(
+    source: Path,
+    destination: Path,
+    *,
+    on_progress: Callable[[float], None] | None,
+) -> Path:
     descriptor = -1
     temporary: Path | None = None
     try:
@@ -130,10 +186,14 @@ def _copy_then_publish(
                 "La copie vers la destination est incomplète ; "
                 "aucun fichier final n'a été créé."
             )
-        _publish_same_filesystem(temporary, destination)
+        return temporary
     except MovieError:
+        if temporary is not None:
+            _unlink_temporary(temporary)
         raise
     except OSError as error:
+        if temporary is not None:
+            _unlink_temporary(temporary)
         raise MovieError(
             "La copie du fichier vérifié vers la destination a échoué ; "
             "aucun fichier final n'a été créé."
@@ -141,15 +201,17 @@ def _copy_then_publish(
     finally:
         if descriptor >= 0:
             os.close(descriptor)
-        if temporary is not None:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                # Un NAS peut retenir brièvement le fichier après une erreur.
-                # Le nettoyage ne doit jamais masquer le diagnostic principal.
-                pass
+
+
+def _unlink_temporary(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        # Un NAS peut retenir brièvement le fichier après une erreur. Le
+        # nettoyage ne doit jamais masquer le diagnostic principal.
+        pass
 
 
 def _darwin_rename_without_overwrite(source: Path, destination: Path) -> bool:

@@ -23,7 +23,12 @@
   le publier atomiquement sur la destination, ce qui évite les verrous de
   lecture observés sur certains partages SMB Synology ;
 - un MKV local déjà vérifié est conservé et signalé si sa publication réseau
-  échoue, afin de ne jamais imposer une nouvelle lecture du disque.
+  échoue, afin de ne jamais imposer une nouvelle lecture du disque ;
+- `convert` et `tag` utilisent désormais le même staging local et la même
+  publication synchronisée pour éviter les fichiers SMB encore verrouillés ;
+- `tag` récupère le fanart panoramique officiel de la fiche TMDB et l'intègre
+  directement au MKV comme seconde illustration, sans fichier compagnon ; la
+  saisie manuelle accepte également un arrière-plan local.
 
 ## 0.2.0 — 2026-09-28
 

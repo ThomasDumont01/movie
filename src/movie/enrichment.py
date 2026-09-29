@@ -16,6 +16,7 @@ from movie.ffmpeg import (
     find_ffmpeg,
     metadata_arguments,
     prepare_artwork,
+    prepare_fanart,
     run_ffmpeg,
 )
 from movie.formats import taggable_format_names, taggable_suffixes
@@ -36,17 +37,19 @@ class MediaTagger:
         source_media: ProbedMedia,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path:
-        artwork = prepare_artwork(metadata, destination.parent)
+        poster = prepare_artwork(metadata, destination.parent)
         suffix = source.suffix.casefold()
         if suffix == ".mkv":
+            fanart = prepare_fanart(metadata, destination.parent)
             command = self._mkv_command(
                 source,
                 metadata,
-                artwork,
+                poster,
+                fanart,
                 source_media,
             )
         elif suffix in taggable_suffixes() - {".mkv"}:
-            command = self._mp4_command(source, metadata, artwork, source_media)
+            command = self._mp4_command(source, metadata, poster, source_media)
         else:  # pragma: no cover - le plan refuse le format avant l'exécution
             raise MovieError(
                 "Les métadonnées et les jaquettes sont prises en charge pour "
@@ -77,29 +80,56 @@ class MediaTagger:
         self,
         source: Path,
         metadata: MovieMetadata,
-        artwork: tuple[Path, str] | None,
+        poster: tuple[Path, str] | None,
+        fanart: Path | None,
         source_media: ProbedMedia,
     ) -> list[str]:
         command = self._base_command(source)
-        mapped_streams = self._map_source_streams(command, source_media, artwork)
+        mapped_streams = self._map_source_streams(command, source_media, poster)
         command.extend(("-map_metadata", "0", "-map_chapters", "0", "-c", "copy"))
-        command.extend(metadata_arguments(metadata))
-        if artwork is not None:
-            poster, mime_type = artwork
-            attachment_index = len(mapped_streams)
-            command.extend(
-                (
-                    "-attach",
-                    str(poster),
-                    f"-metadata:s:{attachment_index}",
-                    f"mimetype={mime_type}",
-                    f"-metadata:s:{attachment_index}",
-                    f"filename={poster.name}",
-                    f"-metadata:s:{attachment_index}",
-                    "title=Jaquette",
-                )
+        attachment_index = len(mapped_streams)
+        if poster is not None:
+            poster_path, mime_type = poster
+            self._add_mkv_attachment(
+                command,
+                poster_path,
+                mime_type=mime_type,
+                stream_index=attachment_index,
+                title="Jaquette",
             )
+            attachment_index += 1
+        if fanart is not None:
+            self._add_mkv_attachment(
+                command,
+                fanart,
+                mime_type=_mime_type(fanart),
+                stream_index=attachment_index,
+                title="Arrière-plan",
+            )
+        command.extend(metadata_arguments(metadata))
         return command
+
+    @staticmethod
+    def _add_mkv_attachment(
+        command: list[str],
+        path: Path,
+        *,
+        mime_type: str,
+        stream_index: int,
+        title: str,
+    ) -> None:
+        command.extend(
+            (
+                "-attach",
+                str(path),
+                f"-metadata:s:{stream_index}",
+                f"mimetype={mime_type}",
+                f"-metadata:s:{stream_index}",
+                f"filename={path.name}",
+                f"-metadata:s:{stream_index}",
+                f"title={title}",
+            )
+        )
 
     def _mp4_command(
         self,
@@ -151,3 +181,12 @@ class MediaTagger:
         for stream in mapped:
             command.extend(("-map", f"0:{stream.stream_id}"))
         return mapped
+
+
+def _mime_type(path: Path) -> str:
+    return {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }[path.suffix.casefold()]

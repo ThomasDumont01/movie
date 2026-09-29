@@ -429,6 +429,7 @@ class CommandFlowTests(TestCase):
                 "Film familial",
                 "Famille, Voyage",
                 "",
+                "",
             ]
 
             with (

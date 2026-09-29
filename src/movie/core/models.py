@@ -126,12 +126,20 @@ class MovieMetadata:
     source_url: str | None = None
     poster_url: str | None = None
     poster_path: Path | None = None
+    fanart_url: str | None = None
+    fanart_path: Path | None = None
 
     @property
     def has_artwork(self) -> bool:
         """Indique si une jaquette distante ou locale doit être intégrée."""
 
         return self.poster_url is not None or self.poster_path is not None
+
+    @property
+    def has_fanart(self) -> bool:
+        """Indique si un arrière-plan local doit accompagner le média."""
+
+        return self.fanart_url is not None or self.fanart_path is not None
 
 
 @dataclass(frozen=True, slots=True)

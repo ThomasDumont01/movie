@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
@@ -180,11 +182,14 @@ class ConversionService:
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> ConvertResult:
         prepare_destination(plan.output)
-        _ensure_free_space(plan)
-        with tempfile.TemporaryDirectory(
-            prefix=".movie-convert-", dir=plan.output.parent
-        ) as work_directory:
-            staging = Path(work_directory)
+        staging_root = Path(tempfile.gettempdir()).resolve()
+        _ensure_free_space(plan, staging_root)
+        staging = Path(tempfile.mkdtemp(prefix="movie-convert-", dir=staging_root))
+        staged_output: Path | None = None
+        verified = False
+        published = False
+        preserve_staging = False
+        try:
             warnings: list[str] = []
             source_file = plan.source
             direct_iso_mkv = (
@@ -192,7 +197,7 @@ class ConversionService:
             )
 
             if plan.iso_title is not None:
-                extraction_end = 0.94 if direct_iso_mkv else 0.45
+                extraction_end = 0.90 if direct_iso_mkv else 0.42
                 make_mkv_run = self.makemkv.rip_iso_title(
                     plan.source,
                     plan.iso_title.title_id,
@@ -213,7 +218,7 @@ class ConversionService:
                 )
                 source_media = self.probe.probe(source_file)
                 warnings.extend(validate_extracted_title(plan.iso_title, source_media))
-                source_ready = extraction_end + 0.03
+                source_ready = extraction_end + 0.04
             else:
                 report_stage(
                     on_progress,
@@ -247,14 +252,14 @@ class ConversionService:
                     on_progress=phase_callback(
                         on_progress,
                         start=source_ready,
-                        end=0.96,
+                        end=0.90,
                     ),
                 )
                 report_stage(
                     on_progress,
                     "Vérification du fichier converti",
                     0.0,
-                    total_fraction=0.96,
+                    total_fraction=0.90,
                 )
                 output_media = self.probe.probe(staged_output)
                 warnings.extend(
@@ -264,24 +269,63 @@ class ConversionService:
                         output_media,
                     )
                 )
+                report_stage(
+                    on_progress,
+                    "Vérification du fichier converti",
+                    1.0,
+                    total_fraction=0.94,
+                )
 
+            verified = True
             report_stage(
                 on_progress,
                 "Publication du fichier final",
                 0.0,
-                total_fraction=0.99,
+                total_fraction=0.94,
             )
-            publish_without_overwrite(staged_output, plan.output)
+
+            def report_copy_progress(fraction: float) -> None:
+                report_stage(
+                    on_progress,
+                    "Copie vers la destination",
+                    fraction,
+                    total_fraction=0.94 + 0.05 * fraction,
+                )
+
+            publish_without_overwrite(
+                staged_output,
+                plan.output,
+                on_copy_progress=(
+                    report_copy_progress if on_progress is not None else None
+                ),
+            )
+            published = True
             report_stage(
                 on_progress,
                 "Publication du fichier final",
                 1.0,
                 total_fraction=1.0,
             )
+        except MovieError as error:
+            if (
+                verified
+                and not published
+                and staged_output is not None
+                and staged_output.is_file()
+            ):
+                preserve_staging = True
+                raise MovieError(
+                    f"{error} Le fichier local vérifié a été conservé ici : "
+                    f"{staged_output}"
+                ) from error
+            raise
+        finally:
+            if not preserve_staging:
+                shutil.rmtree(staging, ignore_errors=True)
 
         return ConvertResult(
             output=plan.output,
-            media=output_media,
+            media=replace(output_media, path=plan.output),
             warnings=tuple(dict.fromkeys(warnings)),
         )
 
@@ -342,7 +386,7 @@ def _make_mkv_diagnostics(run: object) -> tuple[str, ...]:
     return diagnostics if isinstance(diagnostics, tuple) else ()
 
 
-def _ensure_free_space(plan: ConvertPlan) -> None:
+def _ensure_free_space(plan: ConvertPlan, staging_root: Path) -> None:
     required = conversion_required_bytes(
         plan.source,
         output_format=plan.output_format,
@@ -353,3 +397,9 @@ def _ensure_free_space(plan: ConvertPlan) -> None:
         required,
         operation="une conversion sûre",
     )
+    if staging_root.stat().st_dev != plan.output.parent.stat().st_dev:
+        ensure_free_space(
+            staging_root,
+            required,
+            operation="la copie temporaire locale de la conversion",
+        )

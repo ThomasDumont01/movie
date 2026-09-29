@@ -17,7 +17,7 @@ from movie.core.models import (
     ToolUnavailableError,
 )
 
-_MAX_POSTER_BYTES = 15_000_000
+_MAX_ARTWORK_BYTES = 20_000_000
 _USER_AGENT = f"Movie/{__version__} (+local personal media organizer)"
 
 
@@ -88,63 +88,126 @@ def prepare_artwork(
 ) -> tuple[Path, str] | None:
     """Prépare une jaquette distante ou locale dans le dossier temporaire."""
 
-    if metadata.poster_url and metadata.poster_path:
-        raise MovieError("Choisis une jaquette distante ou locale, pas les deux.")
-    if metadata.poster_url:
-        return download_poster(metadata.poster_url, directory)
-    if metadata.poster_path is None:
+    return _prepare_image(
+        remote_url=metadata.poster_url,
+        local_path=metadata.poster_path,
+        directory=directory,
+        filename_stem="cover",
+        label="jaquette",
+    )
+
+
+def prepare_fanart(
+    metadata: MovieMetadata,
+    directory: Path,
+) -> Path | None:
+    """Prépare l'arrière-plan panoramique destiné à la pièce jointe MKV."""
+
+    prepared = _prepare_image(
+        remote_url=metadata.fanart_url,
+        local_path=metadata.fanart_path,
+        directory=directory,
+        filename_stem="fanart",
+        label="arrière-plan",
+    )
+    return prepared[0] if prepared is not None else None
+
+
+def _prepare_image(
+    *,
+    remote_url: str | None,
+    local_path: Path | None,
+    directory: Path,
+    filename_stem: str,
+    label: str,
+) -> tuple[Path, str] | None:
+    if remote_url and local_path:
+        raise MovieError(f"Choisis un {label} distant ou local, pas les deux.")
+    if remote_url:
+        return _download_image(
+            remote_url,
+            directory,
+            filename_stem=filename_stem,
+            label=label,
+        )
+    if local_path is None:
         return None
 
-    source = metadata.poster_path.expanduser().resolve()
+    source = local_path.expanduser().resolve()
     if not source.is_file():
-        raise MovieError(f"La jaquette locale est introuvable : {source}")
+        raise MovieError(f"L'illustration « {label} » est introuvable : {source}")
     try:
-        if source.stat().st_size > _MAX_POSTER_BYTES:
-            raise MovieError("La jaquette locale est trop volumineuse.")
+        if source.stat().st_size > _MAX_ARTWORK_BYTES:
+            raise MovieError(f"L'illustration « {label} » est trop volumineuse.")
         mime_type, extension = _image_format(source.read_bytes())
-        destination = directory / f"cover{extension}"
+        destination = directory / f"{filename_stem}{extension}"
         shutil.copyfile(source, destination)
     except MovieError:
         raise
     except OSError as error:
-        raise MovieError("Impossible de préparer la jaquette locale.") from error
+        raise MovieError(
+            f"Impossible de préparer l'illustration « {label} »."
+        ) from error
     return destination, mime_type
 
 
 def download_poster(url: str, directory: Path) -> tuple[Path, str]:
+    return _download_image(
+        url,
+        directory,
+        filename_stem="cover",
+        label="jaquette",
+    )
+
+
+def _download_image(
+    url: str,
+    directory: Path,
+    *,
+    filename_stem: str,
+    label: str,
+) -> tuple[Path, str]:
     parsed = urlsplit(url)
     if parsed.scheme != "https" or not parsed.hostname:
-        raise MovieError("L'adresse de la jaquette n'est pas une URL HTTPS valide.")
+        raise MovieError(
+            f"L'adresse de l'illustration « {label} » n'est pas une URL HTTPS valide."
+        )
     request = Request(url, headers={"User-Agent": _USER_AGENT})
     try:
         with urlopen(request, timeout=20) as response:
             final_url = urlsplit(response.geturl())
             if final_url.scheme != "https":
                 raise MovieError(
-                    "La jaquette a été redirigée vers une adresse non sécurisée."
+                    f"L'illustration « {label} » a été redirigée vers une adresse "
+                    "non sécurisée."
                 )
             mime_type = response.headers.get_content_type()
             if mime_type not in {"image/jpeg", "image/png", "image/webp"}:
                 raise MovieError(
-                    "La jaquette distante n'est pas une image prise en charge."
+                    f"L'illustration « {label} » n'est pas une image prise en charge."
                 )
-            content = response.read(_MAX_POSTER_BYTES + 1)
+            content = response.read(_MAX_ARTWORK_BYTES + 1)
     except MovieError:
         raise
     except OSError as error:
-        raise MovieError(f"Impossible de télécharger la jaquette : {error}") from error
-    if len(content) > _MAX_POSTER_BYTES:
-        raise MovieError("La jaquette distante est trop volumineuse.")
+        raise MovieError(
+            f"Impossible de télécharger l'illustration « {label} » : {error}"
+        ) from error
+    if len(content) > _MAX_ARTWORK_BYTES:
+        raise MovieError(f"L'illustration « {label} » est trop volumineuse.")
     detected_mime, extension = _image_format(content)
     if detected_mime != mime_type:
         raise MovieError(
-            "Le contenu de la jaquette ne correspond pas à son type d'image."
+            f"Le contenu de l'illustration « {label} » ne correspond pas à son "
+            "type d'image."
         )
-    path = directory / f"cover{extension}"
+    path = directory / f"{filename_stem}{extension}"
     try:
         path.write_bytes(content)
     except OSError as error:
-        raise MovieError("Impossible d'écrire la jaquette temporaire.") from error
+        raise MovieError(
+            f"Impossible d'écrire l'illustration temporaire « {label} »."
+        ) from error
     return path, mime_type
 
 
@@ -155,7 +218,7 @@ def _image_format(content: bytes) -> tuple[str, str]:
         return "image/png", ".png"
     if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
         return "image/webp", ".webp"
-    raise MovieError("La jaquette n'est pas une image JPEG, PNG ou WebP valide.")
+    raise MovieError("Le fichier n'est pas une image JPEG, PNG ou WebP valide.")
 
 
 def _run_captured(command: list[str]) -> subprocess.CompletedProcess[str]:

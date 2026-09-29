@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -16,7 +18,12 @@ from movie.core.models import (
     ProbedMedia,
     ProgressUpdate,
 )
-from movie.core.tag import TagService, _publish_tagged_file, build_tag_plan
+from movie.core.tag import (
+    TagService,
+    _ensure_free_space,
+    _publish_tagged_file,
+    build_tag_plan,
+)
 from movie.formats import taggable_format_names, taggable_suffixes
 
 
@@ -141,6 +148,21 @@ class TagPlanTests(TestCase):
             with self.assertRaisesRegex(MovieError, "titre"):
                 build_tag_plan(target, MovieMetadata(title="   "))
 
+    def test_remote_and_local_fanart_cannot_be_combined(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"source")
+
+            with self.assertRaisesRegex(MovieError, "arrière-plan"):
+                build_tag_plan(
+                    source,
+                    MovieMetadata(
+                        title="Film",
+                        fanart_url="https://image.example/fanart.jpg",
+                        fanart_path=source.with_suffix(".jpg"),
+                    ),
+                )
+
 
 class TagExecutionTests(TestCase):
     def test_verified_result_renames_source_and_reports_progress(self) -> None:
@@ -183,7 +205,99 @@ class TagExecutionTests(TestCase):
             self.assertEqual(plan.output.read_bytes(), b"tagged")
             self.assertEqual(result.media.path, plan.output)
 
-    @patch("movie.core.tag.os.replace", side_effect=PermissionError)
+    def test_official_fanart_is_integrated_without_sidecar(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "A1_t00.mkv"
+            source.write_bytes(b"original")
+            metadata = MovieMetadata(
+                title="Avengers: Endgame",
+                year=2019,
+                summary="Résumé",
+                genres=("Action",),
+                source_url="https://www.themoviedb.org/movie/299534-film",
+                poster_url="https://image.tmdb.org/poster.jpg",
+                fanart_url="https://media.themoviedb.org/t/p/original/fanart.jpg",
+            )
+            plan = build_tag_plan(source, metadata)
+
+            result = TagService(_TagProbe(metadata), _FakeTagger()).execute(plan)
+
+            self.assertEqual(result.warnings, ())
+            self.assertEqual(list(directory.glob("*-fanart.*")), [])
+
+    def test_non_mkv_fanart_limit_is_reported_without_sidecar(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "film.mp4"
+            source.write_bytes(b"original")
+            metadata = replace(
+                _metadata(),
+                fanart_url="https://media.themoviedb.org/t/p/original/fanart.jpg",
+            )
+
+            result = TagService(_TagProbe(metadata), _FakeTagger()).execute(
+                build_tag_plan(source, metadata)
+            )
+
+            self.assertIn("MKV", result.warnings[0])
+            self.assertEqual(list(directory.glob("*-fanart.*")), [])
+
+    def test_missing_embedded_fanart_preserves_the_original(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "film.mkv"
+            source.write_bytes(b"original")
+            metadata = replace(
+                _metadata(),
+                fanart_url="https://media.themoviedb.org/t/p/original/fanart.jpg",
+            )
+
+            with self.assertRaisesRegex(MovieError, "illustrations"):
+                TagService(
+                    _MissingFanartProbe(metadata),
+                    _FakeTagger(),
+                ).execute(build_tag_plan(source, metadata))
+
+            self.assertEqual(source.read_bytes(), b"original")
+
+    def test_tagging_uses_local_staging(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source_directory = directory / "nas"
+            source_directory.mkdir()
+            source = source_directory / "film.mkv"
+            source.write_bytes(b"original")
+            tagger = MagicMock(wraps=_FakeTagger())
+
+            TagService(_TagProbe(_metadata()), tagger).execute(
+                build_tag_plan(source, _metadata())
+            )
+
+            staged_output = tagger.tag.call_args.args[1]
+            self.assertEqual(
+                staged_output.parent.parent, Path(tempfile.gettempdir()).resolve()
+            )
+            self.assertNotEqual(staged_output.parent.parent, source.parent)
+
+    @patch("movie.core.tag.ensure_free_space")
+    def test_tagging_checks_source_and_local_staging_space(
+        self,
+        check_space: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"original")
+            staging_root = MagicMock(spec=Path)
+            staging_root.stat.return_value.st_dev = source.parent.stat().st_dev + 1
+
+            _ensure_free_space(source, staging_root)
+
+            self.assertEqual(check_space.call_count, 2)
+            self.assertEqual(check_space.call_args_list[0].args[0], source.parent)
+            self.assertIs(check_space.call_args_list[1].args[0], staging_root)
+
+    @patch("movie.core.workflow.os.replace", side_effect=PermissionError)
     def test_in_place_publication_failure_preserves_original(
         self, _replace: MagicMock
     ) -> None:
@@ -293,13 +407,20 @@ class _TagProbe:
                 ("comment", f"TMDB: {self.metadata.source_url}"),
             )
             media = _source_media(path)
+            artwork_count = int(self.metadata.has_artwork)
+            if path.suffix.casefold() == ".mkv":
+                artwork_count += int(self.metadata.has_fanart)
+            artwork = tuple(
+                MediaStream("attachment", codec="mjpeg", is_artwork=True)
+                for _ in range(artwork_count)
+            )
             return ProbedMedia(
                 path,
                 media.duration_seconds,
-                (*media.stream_types, "attachment"),
+                (*media.stream_types, *("attachment",) * artwork_count),
                 media.chapter_count,
                 tags,
-                (*media.streams, MediaStream("attachment", codec="mjpeg")),
+                (*media.streams, *artwork),
             )
         return _source_media(path)
 
@@ -307,6 +428,23 @@ class _TagProbe:
 class _InvalidTagProbe:
     def probe(self, path: Path) -> ProbedMedia:
         return _source_media(path)
+
+
+class _MissingFanartProbe(_TagProbe):
+    def probe(self, path: Path) -> ProbedMedia:
+        media = super().probe(path)
+        if not path.name.startswith("tagged"):
+            return media
+        artwork_seen = False
+        streams: list[MediaStream] = []
+        for stream in media.streams:
+            if stream.is_artwork:
+                if artwork_seen:
+                    continue
+                artwork_seen = True
+            streams.append(stream)
+        stream_types = tuple(stream.kind for stream in streams)
+        return replace(media, stream_types=stream_types, streams=tuple(streams))
 
 
 class _FakeTagger:

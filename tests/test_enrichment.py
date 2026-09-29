@@ -26,6 +26,7 @@ from movie.ffmpeg import (
     download_poster,
     find_ffmpeg,
     prepare_artwork,
+    prepare_fanart,
 )
 
 
@@ -68,6 +69,89 @@ class MediaTaggerTests(TestCase):
             self.assertIn("title=Mon Film", command)
             self.assertIn("synopsis=Résumé", command)
             self.assertNotIn("-attach", command)
+
+    @patch("movie.enrichment.prepare_fanart")
+    @patch("movie.enrichment.prepare_artwork")
+    @patch("movie.ffmpeg.subprocess.run")
+    def test_mkv_embeds_poster_and_fanart_as_distinct_attachments(
+        self,
+        run: MagicMock,
+        prepare_artwork_mock: MagicMock,
+        prepare_fanart_mock: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.mkv"
+            destination = directory / "enriched.mkv"
+            poster = directory / "cover.jpg"
+            fanart = directory / "fanart.jpg"
+            poster.write_bytes(b"poster")
+            fanart.write_bytes(b"fanart")
+            prepare_artwork_mock.return_value = (poster, "image/jpeg")
+            prepare_fanart_mock.return_value = fanart
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                Path(command[-1]).write_bytes(b"enriched")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            source_media = ProbedMedia(
+                source,
+                120,
+                ("video", "audio"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264", stream_id=0),
+                    MediaStream("audio", "fra", "aac", stream_id=1),
+                ),
+            )
+
+            MediaTagger("ffmpeg-test").tag(
+                source,
+                destination,
+                MovieMetadata(
+                    title="Film",
+                    poster_url="https://image.tmdb.org/poster.jpg",
+                    fanart_url="https://image.tmdb.org/fanart.jpg",
+                ),
+                source_media=source_media,
+            )
+
+            command = run.call_args.args[0]
+            self.assertEqual(command.count("-attach"), 2)
+            self.assertIn("filename=cover.jpg", command)
+            self.assertIn("title=Jaquette", command)
+            self.assertIn("filename=fanart.jpg", command)
+            self.assertIn("title=Arrière-plan", command)
+
+    @patch("movie.enrichment.prepare_fanart")
+    @patch("movie.ffmpeg.subprocess.run")
+    def test_mp4_does_not_download_an_unsupported_fanart(
+        self,
+        run: MagicMock,
+        prepare_fanart_mock: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.mp4"
+            destination = directory / "enriched.mp4"
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                Path(command[-1]).write_bytes(b"enriched")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaTagger("ffmpeg-test").tag(
+                source,
+                destination,
+                MovieMetadata(
+                    title="Film",
+                    fanart_url="https://image.tmdb.org/fanart.jpg",
+                ),
+                source_media=_media(source),
+            )
+
+            prepare_fanart_mock.assert_not_called()
 
     @patch("movie.ffmpeg.subprocess.run")
     def test_ffmpeg_failure_and_missing_output_are_reported(
@@ -232,6 +316,48 @@ class PosterDownloadTests(TestCase):
             self.assertEqual(prepared[1], "image/png")
             self.assertEqual(prepared[0].read_bytes(), source.read_bytes())
 
+    def test_local_fanart_is_validated_and_gets_a_distinct_name(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "panorama.webp"
+            source.write_bytes(b"RIFF\x00\x00\x00\x00WEBPcontent")
+            staging = directory / "staging"
+            staging.mkdir()
+
+            prepared = prepare_fanart(
+                MovieMetadata(title="Film", fanart_path=source),
+                staging,
+            )
+
+            self.assertIsNotNone(prepared)
+            assert prepared is not None
+            self.assertEqual(prepared.name, "fanart.webp")
+            self.assertEqual(prepared.read_bytes(), source.read_bytes())
+
+    @patch("movie.ffmpeg.urlopen")
+    def test_remote_fanart_is_downloaded_separately_from_poster(
+        self,
+        urlopen: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            urlopen.return_value.__enter__.return_value = _response(
+                final_url="https://media.themoviedb.org/t/p/original/fanart.jpg",
+                mime_type="image/jpeg",
+                content=b"\xff\xd8\xfffanart",
+            )
+
+            prepared = prepare_fanart(
+                MovieMetadata(
+                    title="Film",
+                    fanart_url=("https://media.themoviedb.org/t/p/original/fanart.jpg"),
+                ),
+                Path(temporary_directory),
+            )
+
+            self.assertIsNotNone(prepared)
+            assert prepared is not None
+            self.assertEqual(prepared.name, "fanart.jpg")
+
     def test_invalid_local_poster_is_rejected(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "poster.jpg"
@@ -266,7 +392,7 @@ class PosterDownloadTests(TestCase):
         with self.assertRaisesRegex(MovieError, "image prise en charge"):
             download_poster("https://image.tmdb.org/cover.svg", Path("."))
 
-    @patch("movie.ffmpeg._MAX_POSTER_BYTES", 3)
+    @patch("movie.ffmpeg._MAX_ARTWORK_BYTES", 3)
     @patch("movie.ffmpeg.urlopen")
     def test_oversized_poster_is_rejected(self, urlopen: MagicMock) -> None:
         urlopen.return_value.__enter__.return_value = _response(

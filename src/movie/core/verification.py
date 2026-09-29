@@ -248,9 +248,13 @@ def validate_metadata(metadata: MovieMetadata, media: ProbedMedia) -> None:
             "L'ancien lien TMDB n'a pas été retiré ; "
             "le fichier d'origine a été conservé."
         )
-    if metadata.has_artwork and "attachment" not in media.stream_types:
+    embedded_images = sum(stream.is_artwork for stream in media.streams)
+    expected_images = int(metadata.has_artwork)
+    if media.path.suffix.casefold() == ".mkv":
+        expected_images += int(metadata.has_fanart)
+    if embedded_images < expected_images:
         raise MovieError(
-            "La jaquette n'a pas été retrouvée après écriture ; "
+            "Toutes les illustrations n'ont pas été retrouvées après écriture ; "
             "le fichier d'origine a été conservé."
         )
 
