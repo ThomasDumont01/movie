@@ -15,8 +15,8 @@
 - vérification spécifique des codecs, pistes audio, langues, chapitres et
   durée pour chaque sortie ;
 - tests FFmpeg réels de chaque format en sortie puis comme nouvelle entrée ;
-- nom des médias renseignés normalisé en `année_titre.extension`, sans
-  identifiant de service dans le nom de fichier ;
+- nom des médias renseignés normalisé en `titre_normalisé.extension`, sans
+  année ni identifiant de service dans le nom de fichier ;
 - formats acceptés par `tag` issus du catalogue central et limités aux
   conteneurs dont les informations et la jaquette sont vérifiables.
 

@@ -509,7 +509,7 @@ class FfmpegIntegrationTests(TestCase):
                     result = service.execute(build_tag_plan(source, metadata))
                     self.assertEqual(
                         result.output.name,
-                        f"2026_archive_personnelle{source.suffix}",
+                        f"archive_personnelle{source.suffix}",
                     )
                     self.assertFalse(source.exists())
                     self.assertTrue(result.output.is_file())

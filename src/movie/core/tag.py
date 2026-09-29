@@ -198,12 +198,11 @@ def _ensure_free_space(source: Path) -> None:
 
 
 def _tagged_path(source: Path, metadata: MovieMetadata) -> Path:
-    """Construit le nom stable ``année_titre_normalisé.extension``."""
+    """Construit le nom stable ``titre_normalisé.extension``."""
 
     title = _filename_slug(metadata.title)
-    prefix = f"{metadata.year}_" if metadata.year else ""
     suffix = source.suffix.casefold()
-    filename = _bounded_filename(prefix, title, suffix)
+    filename = _bounded_filename(title, suffix)
     return source.with_name(filename)
 
 
@@ -217,11 +216,10 @@ def _filename_slug(value: str) -> str:
     return _NON_FILENAME_CHARACTERS.sub("_", ascii_value).strip("_") or "media"
 
 
-def _bounded_filename(prefix: str, title: str, extension: str) -> str:
-    reserved = f"{prefix}{extension}"
-    available = _MAX_FILENAME_BYTES - len(reserved.encode("utf-8"))
+def _bounded_filename(title: str, extension: str) -> str:
+    available = _MAX_FILENAME_BYTES - len(extension.encode("utf-8"))
     bounded_title = title[:available].rstrip("_") or "media"
-    return f"{prefix}{bounded_title}{extension}"
+    return f"{bounded_title}{extension}"
 
 
 def _publish_tagged_file(staged_file: Path, source: Path, output: Path) -> None:

@@ -229,12 +229,12 @@ intègre ensuite le titre, l'année, le résumé, les genres, le lien TMDB et la
 jaquette. Aucune clé API et aucun compte ne sont nécessaires.
 
 Le nom du fichier est normalisé en minuscules sous la forme
-`année_titre.extension`. Les espaces, accents et signes de ponctuation deviennent
-des séparateurs simples et l'identifiant TMDB reste dans les métadonnées plutôt
-que dans le nom. Par exemple :
+`titre_normalisé.extension`. Les espaces, accents et signes de ponctuation
+deviennent des séparateurs simples. L'année et l'identifiant TMDB restent dans
+les métadonnées plutôt que dans le nom. Par exemple :
 
 ```text
-2019_star_wars_l_ascension_de_skywalker.mkv
+star_wars_l_ascension_de_skywalker.mkv
 ```
 
 ### Film personnel
@@ -247,11 +247,10 @@ Choisis `manuel`, puis renseigne :
 - les genres, facultatifs ;
 - une jaquette locale JPEG, PNG ou WebP, facultative.
 
-Le fichier reçoit le même nom normalisé. Par exemple, `La Clusaz Noël` daté de
-1974 devient `1974_la_clusaz_noel.mkv`. Sans année, le nom commence directement
-par le titre. Les champs laissés vides effacent les anciennes valeurs
-correspondantes, ce qui permet aussi de retirer une ancienne identification
-TMDB.
+Le fichier reçoit le même nom normalisé. Par exemple, `La Clusaz Noël` devient
+`la_clusaz_noel.mkv` ; son année reste enregistrée dans les métadonnées. Les
+champs laissés vides effacent les anciennes valeurs correspondantes, ce qui
+permet aussi de retirer une ancienne identification TMDB.
 
 ### Sécurité de `tag`
 

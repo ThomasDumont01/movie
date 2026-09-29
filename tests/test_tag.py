@@ -36,7 +36,7 @@ class TagPlanTests(TestCase):
                     self.assertEqual(plan.metadata.genres, ("Drame",))
                     self.assertEqual(plan.output.name, f"mon_film{suffix}")
 
-    def test_name_contains_year_and_normalized_title_without_tmdb_id(self) -> None:
+    def test_name_contains_only_normalized_title_without_tmdb_id(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "A1_t00.mkv"
             source.write_bytes(b"source")
@@ -52,7 +52,8 @@ class TagPlanTests(TestCase):
                 ),
             )
 
-            self.assertEqual(plan.output.name, "2019_avengers_endgame.mkv")
+            self.assertEqual(plan.output.name, "avengers_endgame.mkv")
+            self.assertEqual(plan.metadata.year, 2019)
             self.assertEqual(
                 plan.metadata.source_url,
                 "https://www.themoviedb.org/movie/299534-avengers-endgame",
@@ -75,14 +76,14 @@ class TagPlanTests(TestCase):
                 MovieMetadata(title='Voyage : "Bretagne" / été', year=2024),
             )
 
-            self.assertEqual(plan.output.name, "2024_voyage_bretagne_ete.m4v")
+            self.assertEqual(plan.output.name, "voyage_bretagne_ete.m4v")
 
     def test_existing_renamed_destination_is_refused(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             source = directory / "film.mkv"
             source.write_bytes(b"source")
-            (directory / "2024_mon_film.mkv").write_bytes(b"existing")
+            (directory / "mon_film.mkv").write_bytes(b"existing")
 
             with self.assertRaisesRegex(OutputExistsError, "existe déjà"):
                 build_tag_plan(
@@ -90,7 +91,7 @@ class TagPlanTests(TestCase):
                     MovieMetadata(title="Mon Film", year=2024),
                 )
 
-    def test_long_title_keeps_year_within_filename_limit(self) -> None:
+    def test_long_title_stays_within_filename_limit(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "film.mkv"
             source.write_bytes(b"source")
@@ -105,7 +106,6 @@ class TagPlanTests(TestCase):
             )
 
             self.assertLessEqual(len(plan.output.name.encode("utf-8")), 240)
-            self.assertTrue(plan.output.name.startswith("2024_"))
             self.assertTrue(plan.output.name.endswith(".mkv"))
 
     def test_source_url_is_never_used_in_filename(self) -> None:
@@ -188,7 +188,7 @@ class TagExecutionTests(TestCase):
         self, _replace: MagicMock
     ) -> None:
         with TemporaryDirectory() as temporary_directory:
-            source = Path(temporary_directory) / "2024_mon_film.mkv"
+            source = Path(temporary_directory) / "mon_film.mkv"
             source.write_bytes(b"original")
             plan = build_tag_plan(source, _metadata())
 
