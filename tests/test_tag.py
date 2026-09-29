@@ -21,6 +21,7 @@ from movie.core.models import (
 from movie.core.tag import (
     TagService,
     _ensure_free_space,
+    _ensure_in_place_space,
     _publish_tagged_file,
     build_tag_plan,
 )
@@ -243,7 +244,7 @@ class TagExecutionTests(TestCase):
             self.assertIn("MKV", result.warnings[0])
             self.assertEqual(list(directory.glob("*-fanart.*")), [])
 
-    def test_missing_embedded_fanart_preserves_the_original(self) -> None:
+    def test_missing_embedded_fanart_is_detected_after_direct_edit(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
             source = directory / "film.mkv"
@@ -259,7 +260,7 @@ class TagExecutionTests(TestCase):
                     _FakeTagger(),
                 ).execute(build_tag_plan(source, metadata))
 
-            self.assertEqual(source.read_bytes(), b"original")
+            self.assertEqual(source.read_bytes(), b"tagged")
 
     def test_tagging_uses_local_staging(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -274,11 +275,11 @@ class TagExecutionTests(TestCase):
                 build_tag_plan(source, _metadata())
             )
 
-            staged_output = tagger.tag.call_args.args[1]
+            work_directory = tagger.tag_in_place.call_args.kwargs["work_directory"]
             self.assertEqual(
-                staged_output.parent.parent, Path(tempfile.gettempdir()).resolve()
+                work_directory.parent, Path(tempfile.gettempdir()).resolve()
             )
-            self.assertNotEqual(staged_output.parent.parent, source.parent)
+            self.assertNotEqual(work_directory, source.parent)
 
     @patch("movie.core.tag.ensure_free_space")
     def test_tagging_checks_source_and_local_staging_space(
@@ -297,19 +298,41 @@ class TagExecutionTests(TestCase):
             self.assertEqual(check_space.call_args_list[0].args[0], source.parent)
             self.assertIs(check_space.call_args_list[1].args[0], staging_root)
 
-    @patch("movie.core.workflow.os.replace", side_effect=PermissionError)
-    def test_in_place_publication_failure_preserves_original(
-        self, _replace: MagicMock
+    @patch("movie.core.tag.ensure_free_space")
+    def test_direct_tagging_checks_only_the_small_mkv_editing_margin(
+        self,
+        check_space: MagicMock,
     ) -> None:
         with TemporaryDirectory() as temporary_directory:
-            source = Path(temporary_directory) / "mon_film.mkv"
+            source = Path(temporary_directory) / "film.mkv"
             source.write_bytes(b"original")
-            plan = build_tag_plan(source, _metadata())
+            staging_root = MagicMock(spec=Path)
+            staging_root.stat.return_value.st_dev = source.parent.stat().st_dev + 1
 
-            with self.assertRaisesRegex(MovieError, "remplacer le fichier"):
-                TagService(_TagProbe(_metadata()), _FakeTagger()).execute(plan)
+            _ensure_in_place_space(source, staging_root)
 
-            self.assertEqual(source.read_bytes(), b"original")
+            self.assertEqual(check_space.call_count, 2)
+            for call in check_space.call_args_list:
+                self.assertEqual(call.args[1], 256 * 1024 * 1024)
+
+    @patch(
+        "movie.core.tag.rename_without_overwrite",
+        side_effect=MovieError("renommage refusé"),
+    )
+    def test_rename_failure_keeps_the_directly_enriched_source(
+        self, _rename: MagicMock
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"original")
+
+            with self.assertRaisesRegex(MovieError, "renommage refusé"):
+                TagService(_TagProbe(_metadata()), _FakeTagger()).execute(
+                    build_tag_plan(source, _metadata())
+                )
+
+            self.assertEqual(source.read_bytes(), b"tagged")
+            self.assertFalse((source.parent / "mon_film.mkv").exists())
 
     def test_failed_source_removal_rolls_back_renamed_output(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -338,7 +361,9 @@ class TagExecutionTests(TestCase):
             self.assertTrue(source.is_file())
             self.assertFalse(output.exists())
 
-    def test_tagger_or_verification_failure_preserves_original(self) -> None:
+    def test_tool_failure_preserves_mkv_but_verification_failure_is_reported(
+        self,
+    ) -> None:
         with TemporaryDirectory() as temporary_directory:
             source = Path(temporary_directory) / "film.mkv"
             source.write_bytes(b"original")
@@ -350,7 +375,7 @@ class TagExecutionTests(TestCase):
 
             with self.assertRaisesRegex(MovieError, "titre"):
                 TagService(_InvalidTagProbe(), _FakeTagger()).execute(plan)
-            self.assertEqual(source.read_bytes(), b"original")
+            self.assertEqual(source.read_bytes(), b"tagged")
 
     @patch("movie.core.storage.shutil.disk_usage")
     def test_insufficient_space_stops_before_remux(self, disk_usage: MagicMock) -> None:
@@ -365,7 +390,7 @@ class TagExecutionTests(TestCase):
                     build_tag_plan(source, _metadata())
                 )
 
-            tagger.tag.assert_not_called()
+            tagger.tag_in_place.assert_not_called()
             self.assertEqual(source.read_bytes(), b"original")
 
 
@@ -398,7 +423,7 @@ class _TagProbe:
         self.metadata = metadata
 
     def probe(self, path: Path) -> ProbedMedia:
-        if path.name.startswith("tagged"):
+        if path.is_file() and path.read_bytes() == b"tagged":
             tags = (
                 ("title", self.metadata.title),
                 ("date", str(self.metadata.year)),
@@ -433,7 +458,7 @@ class _InvalidTagProbe:
 class _MissingFanartProbe(_TagProbe):
     def probe(self, path: Path) -> ProbedMedia:
         media = super().probe(path)
-        if not path.name.startswith("tagged"):
+        if not (path.is_file() and path.read_bytes() == b"tagged"):
             return media
         artwork_seen = False
         streams: list[MediaStream] = []
@@ -448,6 +473,20 @@ class _MissingFanartProbe(_TagProbe):
 
 
 class _FakeTagger:
+    def tag_in_place(
+        self,
+        source: Path,
+        metadata: MovieMetadata,
+        *,
+        work_directory: Path,
+        on_progress: Callable[[ProgressUpdate], None] | None = None,
+    ) -> Path:
+        del metadata, work_directory
+        source.write_bytes(b"tagged")
+        if on_progress is not None:
+            on_progress(ProgressUpdate("Écriture directe", None, 1.0, 1.0))
+        return source
+
     def tag(
         self,
         source: Path,
@@ -465,6 +504,10 @@ class _FakeTagger:
 
 
 class _FailingTagger(_FakeTagger):
+    def tag_in_place(self, *args: object, **kwargs: object) -> Path:
+        del args, kwargs
+        raise MovieError("échec simulé")
+
     def tag(self, *args: object, **kwargs: object) -> Path:
         del args, kwargs
         raise MovieError("échec simulé")

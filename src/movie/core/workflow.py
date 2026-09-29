@@ -85,6 +85,33 @@ def replace_with_verified_file(
         _unlink_temporary(temporary)
 
 
+def rename_without_overwrite(source: Path, destination: Path) -> None:
+    """Renomme sur le même volume sans écraser un chemin apparu entre-temps."""
+
+    if source == destination:
+        return
+    if not _same_filesystem(source, destination.parent):
+        raise MovieError("Le renommage direct doit rester sur le même volume.")
+    if sys.platform == "darwin":
+        try:
+            if _darwin_rename_without_overwrite(source, destination):
+                return
+        except FileExistsError as error:
+            raise _destination_appeared(destination) from error
+        except OSError as error:
+            raise MovieError(
+                "Impossible de renommer le fichier enrichi en toute sécurité."
+            ) from error
+    try:
+        _replace_reserved_destination(source, destination)
+    except FileExistsError as error:
+        raise _destination_appeared(destination) from error
+    except OSError as error:
+        raise MovieError(
+            "Impossible de renommer le fichier enrichi en toute sécurité."
+        ) from error
+
+
 def _publish_same_filesystem(staged_file: Path, destination: Path) -> None:
     if sys.platform == "darwin":
         try:

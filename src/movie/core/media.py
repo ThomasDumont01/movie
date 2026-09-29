@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from movie.core.models import (
@@ -22,6 +24,33 @@ class MediaProbe:
         self.executable = executable or _find_ffprobe()
 
     def probe(self, path: Path) -> ProbedMedia:
+        result: subprocess.CompletedProcess[str] | None = None
+        last_error: OSError | None = None
+        for delay in (0.25, 0.75, 2.0, 4.0, None):
+            result, last_error = self._run_probe(path)
+            if result is not None and (
+                result.returncode == 0 or not _is_transient_result(result)
+            ):
+                break
+            if result is None and not _is_transient_os_error(last_error):
+                break
+            if delay is not None:
+                time.sleep(delay)
+
+        if result is None:
+            raise MovieError("Impossible de lancer ffprobe.") from last_error
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout).strip()
+            raise MovieError(
+                f"FFmpeg ne reconnaît pas ce fichier multimédia : {details[-1_000:]}"
+            )
+
+        return self._parse_probe(path, result.stdout)
+
+    def _run_probe(
+        self,
+        path: Path,
+    ) -> tuple[subprocess.CompletedProcess[str] | None, OSError | None]:
         try:
             result = subprocess.run(
                 [
@@ -40,14 +69,13 @@ class MediaProbe:
                 text=True,
             )
         except OSError as error:
-            raise MovieError("Impossible de lancer ffprobe.") from error
-        if result.returncode != 0:
-            details = (result.stderr or result.stdout).strip()
-            raise MovieError(
-                f"FFmpeg ne reconnaît pas ce fichier multimédia : {details[-1_000:]}"
-            )
+            return None, error
+        return result, None
+
+    @staticmethod
+    def _parse_probe(path: Path, output: str) -> ProbedMedia:
         try:
-            payload = json.loads(result.stdout)
+            payload = json.loads(output)
         except json.JSONDecodeError as error:
             raise MovieError("ffprobe a renvoyé une analyse illisible.") from error
 
@@ -89,6 +117,22 @@ class MediaProbe:
             format_tags=format_tags,
             streams=normalized_streams,
         )
+
+
+def _is_transient_result(result: subprocess.CompletedProcess[str]) -> bool:
+    details = (result.stderr or result.stdout).casefold()
+    return any(
+        marker in details
+        for marker in (
+            "resource temporarily unavailable",
+            "resource busy",
+            "device or resource busy",
+        )
+    )
+
+
+def _is_transient_os_error(error: OSError | None) -> bool:
+    return error is not None and error.errno in {errno.EAGAIN, errno.EBUSY}
 
 
 def _find_ffprobe() -> str:

@@ -48,6 +48,8 @@ Movie nécessite :
 - un lecteur compatible avec le support utilisé — un lecteur DVD ne lit pas un
   Blu-ray, et tous les lecteurs Blu-ray ne savent pas ouvrir un UHD ;
 - FFmpeg et ffprobe : `brew install ffmpeg`.
+- MKVToolNix : `brew install mkvtoolnix`, pour modifier rapidement les
+  métadonnées MKV sans recopier le film.
 
 Installation du projet :
 
@@ -75,7 +77,7 @@ Chaque commande possède une seule responsabilité :
 
 | Commande | Rôle | Modifie un média |
 | --- | --- | --- |
-| `doctor` | vérifie MakeMKV, FFmpeg et ffprobe | non |
+| `doctor` | vérifie MakeMKV, FFmpeg, ffprobe et MKVToolNix | non |
 | `drives` | affiche les lecteurs optiques | non |
 | `scan` | analyse le disque vidéo et affiche ses titres | non |
 | `rip` | extrait un titre du disque en MKV | crée un fichier |
@@ -258,15 +260,20 @@ permet aussi de retirer une ancienne identification TMDB.
 
 ### Sécurité de `tag`
 
-Movie écrit et vérifie la copie temporaire sur le disque local, puis la publie
-sur la destination avec la même protection SMB que `rip`. Il vérifie toutes les
-pistes, les informations et la jaquette, publie le nom normalisé sans écraser un
-fichier existant, puis retire l'ancien nom. En cas d'erreur ou d'interruption,
-l'original reste intact. Les nouvelles illustrations remplacent les anciennes
-sans modifier les pistes vidéo, audio, sous-titres, chapitres ou autres pièces
-jointes du MKV. Le fanart est intégré au MKV comme seconde illustration. MP4 et
-M4V conservent leur jaquette intégrée, mais ne disposent pas d'un rôle
-panoramique suffisamment portable pour que Movie y annonce un fanart fiable.
+Pour un MKV, Movie utilise MKVToolNix afin de ne modifier que les en-têtes et les
+illustrations du fichier existant. Les pistes vidéo, audio et sous-titres ne sont
+ni réencodées ni recopiées, même si le film se trouve sur un NAS. Le résultat est
+ensuite relu avec ffprobe ; les pistes, chapitres, durée, informations et
+illustrations sont contrôlés avant le renommage atomique éventuel. Le gain de
+temps et d'espace est important, mais cette écriture directe suppose que le
+volume reste connecté et que l'opération ne soit pas interrompue brutalement.
+
+Pour MP4 et M4V, Movie conserve le fonctionnement transactionnel : il écrit et
+vérifie une copie temporaire locale avant de remplacer l'original. Les nouvelles
+illustrations remplacent les anciennes sans réencodage des pistes. Le fanart est
+intégré au MKV comme seconde illustration ; MP4 et M4V conservent leur jaquette
+intégrée, mais ne disposent pas d'un rôle panoramique suffisamment portable pour
+que Movie y annonce un fanart fiable.
 
 ## Configuration
 

@@ -50,6 +50,37 @@ class MediaProbeTests(TestCase):
         with self.assertRaisesRegex(MovieError, "fichier invalide"):
             MediaProbe("ffprobe-test").probe(Path("film.mkv"))
 
+    @patch("movie.core.media.time.sleep")
+    @patch("movie.core.media.subprocess.run")
+    def test_probe_retries_a_temporarily_busy_network_file(
+        self,
+        run: MagicMock,
+        sleep: MagicMock,
+    ) -> None:
+        run.side_effect = (
+            CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="Resource temporarily unavailable",
+            ),
+            CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=(
+                    '{"format":{"duration":"1"},'
+                    '"streams":[{"codec_type":"video"}],"chapters":[]}'
+                ),
+                stderr="",
+            ),
+        )
+
+        media = MediaProbe("ffprobe-test").probe(Path("film.mkv"))
+
+        self.assertEqual(media.duration_seconds, 1.0)
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(0.25)
+
     @patch("movie.core.media.subprocess.run")
     def test_probe_reports_invalid_json(self, run: MagicMock) -> None:
         run.return_value = CompletedProcess(

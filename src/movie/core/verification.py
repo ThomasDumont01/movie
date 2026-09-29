@@ -173,89 +173,59 @@ def validate_preserved_media(
     )
     if expected - actual:
         raise MovieError(
-            "L'écriture des métadonnées aurait supprimé ou modifié une piste ; "
-            "le fichier d'origine a été conservé."
+            "La vérification indique qu'une piste a été supprimée ou modifiée "
+            "pendant l'écriture des métadonnées."
         )
     if source.chapter_count and output.chapter_count < source.chapter_count:
         raise MovieError(
-            "L'écriture des métadonnées aurait supprimé des chapitres ; "
-            "le fichier d'origine a été conservé."
+            "La vérification indique que des chapitres ont été supprimés "
+            "pendant l'écriture des métadonnées."
         )
     if (
         source.duration_seconds
         and output.duration_seconds
         and abs(source.duration_seconds - output.duration_seconds) > 3
     ):
-        raise MovieError(
-            "La durée a changé pendant l'écriture des métadonnées ; "
-            "le fichier d'origine a été conservé."
-        )
+        raise MovieError("La durée a changé pendant l'écriture des métadonnées.")
 
 
 def validate_metadata(metadata: MovieMetadata, media: ProbedMedia) -> None:
-    """Relit chaque métadonnée demandée avant le remplacement de l'original."""
+    """Relit chaque métadonnée demandée après son écriture."""
 
     tags = {key.casefold(): value for key, value in media.format_tags}
     if tags.get("title") != metadata.title:
-        raise MovieError(
-            "Le titre n'a pas été retrouvé après écriture ; "
-            "le fichier d'origine a été conservé."
-        )
-    if metadata.year is not None and str(metadata.year) not in tags.get("date", ""):
-        raise MovieError(
-            "L'année n'a pas été retrouvée après écriture ; "
-            "le fichier d'origine a été conservé."
-        )
-    if metadata.year is None and tags.get("date"):
-        raise MovieError(
-            "L'ancienne année n'a pas été retirée ; "
-            "le fichier d'origine a été conservé."
-        )
+        raise MovieError("Le titre n'a pas été retrouvé après écriture.")
+    stored_date = tags.get("date_released") or tags.get("date") or tags.get("year", "")
+    if metadata.year is not None and str(metadata.year) not in stored_date:
+        raise MovieError("L'année n'a pas été retrouvée après écriture.")
+    if metadata.year is None and stored_date:
+        raise MovieError("L'ancienne année n'a pas été retirée.")
     if metadata.summary and metadata.summary not in tags.get("description", ""):
-        raise MovieError(
-            "La description n'a pas été retrouvée après écriture ; "
-            "le fichier d'origine a été conservé."
-        )
+        raise MovieError("La description n'a pas été retrouvée après écriture.")
     if metadata.summary is None and tags.get("description"):
-        raise MovieError(
-            "L'ancienne description n'a pas été retirée ; "
-            "le fichier d'origine a été conservé."
-        )
+        raise MovieError("L'ancienne description n'a pas été retirée.")
     if metadata.genres:
         actual_genres = tags.get("genre", "").casefold()
         if any(genre.casefold() not in actual_genres for genre in metadata.genres):
-            raise MovieError(
-                "Les genres n'ont pas été retrouvés après écriture ; "
-                "le fichier d'origine a été conservé."
-            )
+            raise MovieError("Les genres n'ont pas été retrouvés après écriture.")
     elif tags.get("genre"):
-        raise MovieError(
-            "Les anciens genres n'ont pas été retirés ; "
-            "le fichier d'origine a été conservé."
-        )
+        raise MovieError("Les anciens genres n'ont pas été retirés.")
     if metadata.source_url and not any(
         metadata.source_url in value for value in tags.values()
     ):
-        raise MovieError(
-            "Le lien TMDB n'a pas été retrouvé après écriture ; "
-            "le fichier d'origine a été conservé."
-        )
+        raise MovieError("Le lien TMDB n'a pas été retrouvé après écriture.")
     if metadata.source_url is None and any(
         "themoviedb.org/movie/" in tags.get(key, "")
         for key in ("movie_source", "comment")
     ):
-        raise MovieError(
-            "L'ancien lien TMDB n'a pas été retiré ; "
-            "le fichier d'origine a été conservé."
-        )
+        raise MovieError("L'ancien lien TMDB n'a pas été retiré.")
     embedded_images = sum(stream.is_artwork for stream in media.streams)
     expected_images = int(metadata.has_artwork)
     if media.path.suffix.casefold() == ".mkv":
         expected_images += int(metadata.has_fanart)
     if embedded_images < expected_images:
         raise MovieError(
-            "Toutes les illustrations n'ont pas été retrouvées après écriture ; "
-            "le fichier d'origine a été conservé."
+            "Toutes les illustrations n'ont pas été retrouvées après écriture."
         )
 
 

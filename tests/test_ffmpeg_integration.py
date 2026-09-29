@@ -449,7 +449,7 @@ class FfmpegIntegrationTests(TestCase):
             self.assertEqual(tags.get("title"), metadata.title)
             self.assertIn("2026", tags.get("date", ""))
 
-    def test_real_tag_service_atomically_validates_every_supported_format(self) -> None:
+    def test_real_tag_service_validates_every_supported_format(self) -> None:
         assert FFMPEG is not None
         assert FFPROBE is not None
         with TemporaryDirectory() as temporary_directory:
@@ -508,11 +508,13 @@ class FfmpegIntegrationTests(TestCase):
                 summary="Souvenir familial",
                 genres=("Famille", "Voyage"),
                 poster_path=poster,
+                fanart_path=poster,
             )
             service = TagService(MediaProbe(FFPROBE), MediaTagger(FFMPEG))
 
             for source in (mkv, mp4, m4v):
                 with self.subTest(source=source.suffix):
+                    original_inode = source.stat().st_ino
                     result = service.execute(build_tag_plan(source, metadata))
                     self.assertEqual(
                         result.output.name,
@@ -521,6 +523,13 @@ class FfmpegIntegrationTests(TestCase):
                     self.assertFalse(source.exists())
                     self.assertTrue(result.output.is_file())
                     self.assertIn("attachment", result.media.stream_types)
+                    expected_artwork = 2 if source.suffix == ".mkv" else 1
+                    self.assertEqual(
+                        result.media.stream_types.count("attachment"),
+                        expected_artwork,
+                    )
+                    if source.suffix == ".mkv":
+                        self.assertEqual(result.output.stat().st_ino, original_inode)
                     tags = {
                         key.casefold(): value for key, value in result.media.format_tags
                     }

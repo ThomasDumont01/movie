@@ -47,6 +47,7 @@ from movie.formats import (
     taggable_format_names,
     taggable_suffixes,
 )
+from movie.matroska import find_mkvextract, find_mkvmerge, find_mkvpropedit
 from movie.metadata import MetadataClient, movie_search_url
 from movie.terminal import (
     _alert_user,
@@ -111,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser(
         "doctor",
-        help="vérifie que MakeMKV et FFmpeg sont prêts",
+        help="vérifie que les outils multimédias sont prêts",
         description="Vérifie les logiciels nécessaires et explique comment les installer.",
     )
     commands.add_parser(
@@ -195,11 +196,21 @@ def _doctor() -> int:
     makemkv = _tool_status(find_makemkvcon)
     ffprobe = shutil.which("ffprobe")
     ffmpeg = shutil.which("ffmpeg")
+    mkvpropedit = _tool_status(find_mkvpropedit)
+    mkvextract = _tool_status(find_mkvextract)
+    mkvmerge = _tool_status(find_mkvmerge)
     makemkv_missing = makemkv.startswith("introuvable")
+    mkvtoolnix_missing = any(
+        path.startswith("introuvable") for path in (mkvpropedit, mkvextract, mkvmerge)
+    )
     print(f"  {'✓' if not makemkv_missing else '✗'} MakeMKV : {makemkv}")
     print(f"  {'✓' if ffprobe else '✗'} ffprobe : {ffprobe or 'introuvable'}")
     print(f"  {'✓' if ffmpeg else '✗'} FFmpeg : {ffmpeg or 'introuvable'}")
-    if makemkv_missing or not ffprobe or not ffmpeg:
+    print(
+        f"  {'✓' if not mkvtoolnix_missing else '✗'} MKVToolNix : "
+        f"{mkvpropedit if not mkvtoolnix_missing else 'incomplet ou introuvable'}"
+    )
+    if makemkv_missing or not ffprobe or not ffmpeg or mkvtoolnix_missing:
         _print_subheading("Installation des outils manquants")
         if makemkv_missing:
             print("  MakeMKV :")
@@ -211,9 +222,13 @@ def _doctor() -> int:
             print("  FFmpeg et ffprobe :")
             print("    Avec Homebrew : brew install ffmpeg")
             print("    Informations : https://formulae.brew.sh/formula/ffmpeg")
+        if mkvtoolnix_missing:
+            print("  MKVToolNix :")
+            print("    Avec Homebrew : brew install mkvtoolnix")
+            print("    Informations : https://formulae.brew.sh/formula/mkvtoolnix")
         print("\nUne fois l'installation terminée, relance : uv run movie doctor")
         return 2
-    print("\n✓ Movie est prêt à numériser et convertir tes médias.")
+    print("\n✓ Movie est prêt à numériser, convertir et renseigner tes médias.")
     return 0
 
 
@@ -618,10 +633,17 @@ def _tag() -> int:
     else:
         fanart_status = "non"
     print(f"  Arrière-plan : {fanart_status}")
-    print("  Traitement   : copie des pistes, sans réencodage")
-    print(
-        "  Sécurité     : l'original reste intact tant que la vérification n'est pas finie"
-    )
+    if plan.source.suffix.casefold() == ".mkv":
+        print(
+            "  Traitement   : métadonnées modifiées directement, sans copie de la vidéo"
+        )
+        print("  Sécurité     : pistes relues et contrôlées après l'écriture")
+    else:
+        print("  Traitement   : copie des pistes, sans réencodage")
+        print(
+            "  Sécurité     : l'original reste intact tant que la vérification "
+            "n'est pas finie"
+        )
 
     if not config.auto_run and not _prompt_yes_no(
         "Écrire ces informations dans le fichier ?"

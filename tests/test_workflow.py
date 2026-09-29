@@ -9,10 +9,42 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from movie.core.models import MovieError, OutputExistsError
-from movie.core.workflow import publish_without_overwrite, replace_with_verified_file
+from movie.core.workflow import (
+    publish_without_overwrite,
+    rename_without_overwrite,
+    replace_with_verified_file,
+)
 
 
 class PublicationTests(TestCase):
+    def test_direct_rename_moves_the_file_without_copying_it(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.mkv"
+            destination = directory / "film.mkv"
+            source.write_bytes(b"same file")
+            original_inode = source.stat().st_ino
+
+            rename_without_overwrite(source, destination)
+
+            self.assertFalse(source.exists())
+            self.assertEqual(destination.read_bytes(), b"same file")
+            self.assertEqual(destination.stat().st_ino, original_inode)
+
+    def test_direct_rename_never_overwrites_an_existing_file(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.mkv"
+            destination = directory / "film.mkv"
+            source.write_bytes(b"source")
+            destination.write_bytes(b"existing")
+
+            with self.assertRaisesRegex(OutputExistsError, "Rien n'a été écrasé"):
+                rename_without_overwrite(source, destination)
+
+            self.assertEqual(source.read_bytes(), b"source")
+            self.assertEqual(destination.read_bytes(), b"existing")
+
     def test_verified_file_is_published_without_overwrite(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)

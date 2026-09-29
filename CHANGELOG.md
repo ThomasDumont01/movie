@@ -24,8 +24,13 @@
   lecture observés sur certains partages SMB Synology ;
 - un MKV local déjà vérifié est conservé et signalé si sa publication réseau
   échoue, afin de ne jamais imposer une nouvelle lecture du disque ;
-- `convert` et `tag` utilisent désormais le même staging local et la même
+- `convert` et `tag` pour MP4/M4V utilisent le même staging local et la même
   publication synchronisée pour éviter les fichiers SMB encore verrouillés ;
+- `tag` modifie désormais les métadonnées et illustrations MKV directement avec
+  MKVToolNix, sans recopier les pistes ni le fichier complet, puis vérifie le
+  résultat avec ffprobe avant son renommage éventuel ;
+- ffprobe retente automatiquement la lecture lorsqu'un partage SMB conserve
+  brièvement un fichier occupé après une écriture ;
 - `tag` récupère le fanart panoramique officiel de la fiche TMDB et l'intègre
   directement au MKV comme seconde illustration, sans fichier compagnon ; la
   saisie manuelle accepte également un arrière-plan local.

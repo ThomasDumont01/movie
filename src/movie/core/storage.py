@@ -39,6 +39,12 @@ def tag_required_bytes(source: Path) -> int:
     return source.stat().st_size + TAG_MARGIN_BYTES
 
 
+def tag_in_place_required_bytes() -> int:
+    """Marge destinée aux en-têtes et illustrations d'un MKV modifié sur place."""
+
+    return TAG_MARGIN_BYTES
+
+
 def output_directory_issue(
     directory: Path,
     *,

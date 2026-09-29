@@ -20,7 +20,11 @@ from movie.core.models import (
     TagPlan,
     TagResult,
 )
-from movie.core.storage import ensure_free_space, tag_required_bytes
+from movie.core.storage import (
+    ensure_free_space,
+    tag_in_place_required_bytes,
+    tag_required_bytes,
+)
 from movie.core.verification import (
     validate_metadata,
     validate_preserved_media,
@@ -31,6 +35,7 @@ from movie.core.workflow import (
     phase_callback,
     prepare_destination,
     publish_without_overwrite,
+    rename_without_overwrite,
     replace_with_verified_file,
     report_stage,
 )
@@ -55,6 +60,15 @@ class _ProbeBackend(Protocol):
 
 
 class _TaggerBackend(Protocol):
+    def tag_in_place(
+        self,
+        source: Path,
+        metadata: MovieMetadata,
+        *,
+        work_directory: Path,
+        on_progress: Callable[[ProgressUpdate], None] | None = None,
+    ) -> Path: ...
+
     def tag(
         self,
         source: Path,
@@ -119,7 +133,7 @@ def build_tag_plan(
 
 
 class TagService:
-    """Remuxe, vérifie puis remplace atomiquement le média d'origine."""
+    """Enrichit un média, directement pour MKV ou par remuxage pour MP4/M4V."""
 
     def __init__(self, probe: _ProbeBackend, tagger: _TaggerBackend) -> None:
         self.probe = probe
@@ -133,6 +147,91 @@ class TagService:
     ) -> TagResult:
         source_media = self.probe.probe(plan.source)
         validate_source(source_media)
+        if plan.source.suffix.casefold() == ".mkv":
+            return self._execute_mkv_in_place(
+                plan,
+                source_media,
+                on_progress=on_progress,
+            )
+        return self._execute_remux(
+            plan,
+            source_media,
+            on_progress=on_progress,
+        )
+
+    def _execute_mkv_in_place(
+        self,
+        plan: TagPlan,
+        source_media: ProbedMedia,
+        *,
+        on_progress: Callable[[ProgressUpdate], None] | None,
+    ) -> TagResult:
+        staging_root = Path(tempfile.gettempdir()).resolve()
+        _ensure_in_place_space(plan.source, staging_root)
+        if plan.output != plan.source:
+            prepare_destination(plan.output)
+
+        with tempfile.TemporaryDirectory(
+            prefix="movie-tag-mkv-", dir=staging_root
+        ) as work_directory:
+            report_stage(
+                on_progress,
+                "Préparation des métadonnées",
+                0.0,
+                total_fraction=0.0,
+            )
+            self.tagger.tag_in_place(
+                plan.source,
+                plan.metadata,
+                work_directory=Path(work_directory),
+                on_progress=phase_callback(on_progress, start=0.02, end=0.82),
+            )
+            report_stage(
+                on_progress,
+                "Vérification du MKV enrichi",
+                0.0,
+                total_fraction=0.82,
+            )
+            output_media = self.probe.probe(plan.source)
+            validate_preserved_media(
+                source_media,
+                output_media,
+                replace_artwork=plan.metadata.has_artwork,
+            )
+            validate_metadata(plan.metadata, output_media)
+            report_stage(
+                on_progress,
+                "Vérification du MKV enrichi",
+                1.0,
+                total_fraction=0.94,
+            )
+            if plan.output != plan.source:
+                report_stage(
+                    on_progress,
+                    "Renommage du fichier",
+                    0.0,
+                    total_fraction=0.94,
+                )
+                rename_without_overwrite(plan.source, plan.output)
+            report_stage(
+                on_progress,
+                "Métadonnées enregistrées",
+                1.0,
+                total_fraction=1.0,
+            )
+
+        return TagResult(
+            output=plan.output,
+            media=replace(output_media, path=plan.output),
+        )
+
+    def _execute_remux(
+        self,
+        plan: TagPlan,
+        source_media: ProbedMedia,
+        *,
+        on_progress: Callable[[ProgressUpdate], None] | None,
+    ) -> TagResult:
         staging_root = Path(tempfile.gettempdir()).resolve()
         _ensure_free_space(plan.source, staging_root)
         if plan.output != plan.source:
@@ -151,7 +250,7 @@ class TagService:
                         "fiable que dans un MKV ; la jaquette reste intégrée."
                     )
                 ]
-                if plan.metadata.has_fanart and plan.source.suffix.casefold() != ".mkv"
+                if plan.metadata.has_fanart
                 else []
             )
             report_stage(
@@ -241,6 +340,21 @@ def _ensure_free_space(source: Path, staging_root: Path) -> None:
             staging_root,
             required,
             operation="la copie temporaire locale du média",
+        )
+
+
+def _ensure_in_place_space(source: Path, staging_root: Path) -> None:
+    required = tag_in_place_required_bytes()
+    ensure_free_space(
+        source.parent,
+        required,
+        operation="modifier les métadonnées du MKV",
+    )
+    if staging_root.stat().st_dev != source.parent.stat().st_dev:
+        ensure_free_space(
+            staging_root,
+            required,
+            operation="préparer localement les métadonnées et illustrations",
         )
 
 

@@ -158,6 +158,7 @@ class DoctorTests(TestCase):
         self.assertEqual(result, 2)
         self.assertIn("https://www.makemkv.com/download/", output.getvalue())
         self.assertIn("brew install ffmpeg", output.getvalue())
+        self.assertIn("brew install mkvtoolnix", output.getvalue())
         self.assertIn("uv run movie doctor", output.getvalue())
 
 

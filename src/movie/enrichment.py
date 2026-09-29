@@ -20,13 +20,37 @@ from movie.ffmpeg import (
     run_ffmpeg,
 )
 from movie.formats import taggable_format_names, taggable_suffixes
+from movie.matroska import MatroskaEditor
 
 
 class MediaTagger:
     """Remuxe un média compatible en conservant ses flux utiles."""
 
-    def __init__(self, executable: str | None = None) -> None:
+    def __init__(
+        self,
+        executable: str | None = None,
+        *,
+        matroska_editor: MatroskaEditor | None = None,
+    ) -> None:
         self.executable = executable
+        self.matroska_editor = matroska_editor or MatroskaEditor()
+
+    def tag_in_place(
+        self,
+        source: Path,
+        metadata: MovieMetadata,
+        *,
+        work_directory: Path,
+        on_progress: Callable[[ProgressUpdate], None] | None = None,
+    ) -> Path:
+        """Modifie les en-têtes d'un MKV sans recopier ses pistes."""
+
+        return self.matroska_editor.edit(
+            source,
+            metadata,
+            work_directory=work_directory,
+            on_progress=on_progress,
+        )
 
     def tag(
         self,
