@@ -83,8 +83,9 @@ Chaque commande possède une seule responsabilité :
 | `tag` | ajoute ou corrige les métadonnées | met à jour un fichier |
 | `config` | enregistre les préférences | écrit la configuration |
 
-Cette séparation garantit qu'une panne réseau ou une mauvaise jaquette ne peut
-plus faire échouer une longue numérisation de disque.
+Cette séparation et le travail local de `rip` garantissent qu'une panne réseau
+au moment de la publication ne force pas à relire le disque : le MKV déjà
+vérifié est conservé avec son chemin de récupération.
 
 ## Analyser un disque vidéo
 
@@ -295,8 +296,9 @@ aucun résultat incomplet.
 
 Movie applique les garanties suivantes :
 
-- contrôle de l'espace libre avant une opération coûteuse ;
-- travail temporaire sur le volume de destination ;
+- contrôle de l'espace libre local et distant avant une opération coûteuse ;
+- extraction et vérification de `rip` sur le disque local, hors du partage
+  réseau ;
 - vérification du résultat avec ffprobe ;
 - blocage d'un résultat illisible, sans vidéo/audio utile ou fortement tronqué ;
 - avertissement explicite pour les différences de pistes optionnelles, de
@@ -305,7 +307,10 @@ Movie applique les garanties suivantes :
   erreurs de lecture récupérables et corrections de synchronisation ;
 - contrôle des métadonnées et de la jaquette après écriture ;
 - refus d'écraser une destination ou un lien symbolique ;
-- publication atomique ;
+- copie fermée et synchronisée vers un fichier caché du volume cible, puis
+  publication atomique ;
+- conservation du MKV local vérifié, avec son chemin affiché, si la publication
+  réseau échoue ;
 - nettoyage après réussite, erreur ou interruption.
 
 ## Movie, MakeMKV et `dd`
@@ -348,7 +353,7 @@ uv run pyright
 
 État vérifié le 29 septembre 2026 pour la version 0.3.0 :
 
-- 161 tests et 85 sous-tests réussissent ;
+- 166 tests et 85 sous-tests réussissent ;
 - la couverture automatisée atteint 86 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;
@@ -379,6 +384,7 @@ uv run pyright
 | --- | --- | --- |
 | MakeMKV reste nécessaire | Movie pilote MakeMKV ; il ne réimplémente ni la lecture optique ni le déchiffrement. Si MakeMKV refuse un disque, Movie ne peut pas le forcer. | Vérifier d'abord le disque dans MakeMKV et relancer `doctor`. |
 | Compatibilité Blu-ray/UHD dépendante du matériel | Movie accepte ces supports, mais ne peut pas ajouter à un lecteur les capacités optiques ou le firmware requis par MakeMKV. Certains UHD nécessitent un lecteur spécifiquement compatible. | Vérifier le support avec `movie scan` ; si MakeMKV ne peut pas l'ouvrir, utiliser un lecteur/firmware compatible. |
+| `rip` utilise un espace temporaire local | Le MKV est vérifié sur le Mac avant sa copie vers le NAS ; il faut donc disposer localement d'un espace proche de la taille annoncée du titre. | Libérer de l'espace sur le Mac avant un gros Blu-ray/UHD ; Movie contrôle cette capacité avant de lancer le lecteur. |
 | Pas de CD audio ni de disque de données | MakeMKV expose des titres vidéo, pas les pistes d'un CD audio ni les fichiers d'un disque de données. | Employer un outil d'extraction audio ou une copie de fichiers adaptée à ces supports. |
 | Un titre est extrait à la fois | Un disque de série avec plusieurs épisodes demande une exécution par épisode. | Relancer `rip` ou `convert` pour chaque titre voulu. |
 | Les menus ne sont pas conservés | Un fichier vidéo contient le film et ses pistes, pas l'interface interactive du disque. | Conserver une image complète du disque si les menus sont indispensables. |

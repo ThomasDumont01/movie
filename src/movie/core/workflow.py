@@ -6,6 +6,7 @@ import ctypes
 import errno
 import os
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -34,7 +35,25 @@ def prepare_destination(output: Path) -> None:
         ) from error
 
 
-def publish_without_overwrite(staged_file: Path, destination: Path) -> None:
+def publish_without_overwrite(
+    staged_file: Path,
+    destination: Path,
+    *,
+    on_copy_progress: Callable[[float], None] | None = None,
+) -> None:
+    """Publie un fichier vérifié, même entre deux volumes différents."""
+
+    if not _same_filesystem(staged_file, destination.parent):
+        _copy_then_publish(
+            staged_file,
+            destination,
+            on_progress=on_copy_progress,
+        )
+        return
+    _publish_same_filesystem(staged_file, destination)
+
+
+def _publish_same_filesystem(staged_file: Path, destination: Path) -> None:
     if sys.platform == "darwin":
         try:
             if _darwin_rename_without_overwrite(staged_file, destination):
@@ -64,6 +83,73 @@ def publish_without_overwrite(staged_file: Path, destination: Path) -> None:
             raise MovieError(
                 "Publication sûre impossible ; aucun fichier final n'a été créé."
             ) from error
+
+
+def _same_filesystem(source: Path, destination_directory: Path) -> bool:
+    try:
+        return source.stat().st_dev == destination_directory.stat().st_dev
+    except OSError as error:
+        raise MovieError(
+            "Impossible de comparer les volumes de travail et de destination."
+        ) from error
+
+
+def _copy_then_publish(
+    source: Path,
+    destination: Path,
+    *,
+    on_progress: Callable[[float], None] | None,
+) -> None:
+    """Copie vers le volume cible avant une publication atomique locale."""
+
+    descriptor = -1
+    temporary: Path | None = None
+    try:
+        descriptor, raw_path = tempfile.mkstemp(
+            prefix=f".{destination.name}.",
+            suffix=".movie-copy",
+            dir=destination.parent,
+        )
+        temporary = Path(raw_path)
+        source_size = source.stat().st_size
+        copied = 0
+        with (
+            source.open("rb") as input_file,
+            os.fdopen(descriptor, "wb") as output_file,
+        ):
+            descriptor = -1
+            while chunk := input_file.read(8 * 1024 * 1024):
+                output_file.write(chunk)
+                copied += len(chunk)
+                if on_progress is not None and source_size:
+                    on_progress(min(1.0, copied / source_size))
+            output_file.flush()
+            os.fsync(output_file.fileno())
+        if temporary.stat().st_size != source_size:
+            raise MovieError(
+                "La copie vers la destination est incomplète ; "
+                "aucun fichier final n'a été créé."
+            )
+        _publish_same_filesystem(temporary, destination)
+    except MovieError:
+        raise
+    except OSError as error:
+        raise MovieError(
+            "La copie du fichier vérifié vers la destination a échoué ; "
+            "aucun fichier final n'a été créé."
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # Un NAS peut retenir brièvement le fichier après une erreur.
+                # Le nettoyage ne doit jamais masquer le diagnostic principal.
+                pass
 
 
 def _darwin_rename_without_overwrite(source: Path, destination: Path) -> bool:

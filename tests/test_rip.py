@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from collections.abc import Callable
 from dataclasses import replace
@@ -23,6 +24,7 @@ from movie.core.models import (
 )
 from movie.core.rip import (
     RipService,
+    _ensure_free_space,
     _single_mkv,
     _validate_media,
     build_rip_plan,
@@ -126,11 +128,48 @@ class RipExecutionTests(unittest.TestCase):
             plan = build_rip_plan(_scan(), destination)
             service = RipService(_FakeMakeMkv(), _ValidProbe())
 
-            result = service.execute(plan)
+            with patch(
+                "movie.core.rip.tempfile.gettempdir",
+                return_value=temporary_directory,
+            ):
+                result = service.execute(plan)
 
             self.assertEqual(result.output, plan.output)
+            self.assertEqual(result.media.path, plan.output)
             self.assertEqual(plan.output.read_bytes(), b"mkv")
-            self.assertEqual(list(destination.glob(".movie-staging-*")), [])
+            self.assertEqual(list(Path(temporary_directory).glob("movie-rip-*")), [])
+
+    def test_makemkv_writes_to_local_staging_before_publication(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            destination = Path(temporary_directory) / "Films"
+            plan = build_rip_plan(_scan(), destination)
+            backend = _FakeMakeMkv()
+            original_rip = backend.rip_title
+            backend.rip_title = MagicMock(side_effect=original_rip)  # type: ignore[method-assign]
+
+            RipService(backend, _ValidProbe()).execute(plan)
+
+            staging = backend.rip_title.call_args.args[2]
+            self.assertEqual(staging.parent, Path(tempfile.gettempdir()).resolve())
+            self.assertNotEqual(staging.parent, destination)
+
+    @patch("movie.core.rip.ensure_free_space")
+    def test_space_is_checked_on_destination_and_local_staging(
+        self,
+        check_space: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            plan = build_rip_plan(_scan(), Path(temporary_directory) / "Films")
+            plan = replace(plan, title=replace(plan.title, size_bytes=1_000_000))
+            plan.output.parent.mkdir()
+            staging_root = MagicMock(spec=Path)
+            staging_root.stat.return_value.st_dev = plan.output.parent.stat().st_dev + 1
+
+            _ensure_free_space(plan, staging_root)
+
+            self.assertEqual(check_space.call_count, 2)
+            self.assertEqual(check_space.call_args_list[0].args[0], plan.output.parent)
+            self.assertIs(check_space.call_args_list[1].args[0], staging_root)
 
     def test_failed_verification_publishes_nothing(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -138,11 +177,47 @@ class RipExecutionTests(unittest.TestCase):
             plan = build_rip_plan(_scan(), destination)
             service = RipService(_FakeMakeMkv(), _InvalidProbe())
 
-            with self.assertRaisesRegex(Exception, "aucune piste vidéo"):
+            with (
+                patch(
+                    "movie.core.rip.tempfile.gettempdir",
+                    return_value=temporary_directory,
+                ),
+                self.assertRaisesRegex(Exception, "aucune piste vidéo"),
+            ):
                 service.execute(plan)
 
             self.assertFalse(plan.output.exists())
-            self.assertEqual(list(destination.glob(".movie-staging-*")), [])
+            self.assertEqual(list(Path(temporary_directory).glob("movie-rip-*")), [])
+
+    def test_verified_local_mkv_is_preserved_when_nas_publication_fails(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            plan = build_rip_plan(_scan(), root / "Films")
+            service = RipService(_FakeMakeMkv(), _ValidProbe())
+
+            with (
+                patch(
+                    "movie.core.rip.tempfile.gettempdir",
+                    return_value=temporary_directory,
+                ),
+                patch(
+                    "movie.core.rip._publish_without_overwrite",
+                    side_effect=MovieError("NAS indisponible"),
+                ),
+                self.assertRaisesRegex(
+                    MovieError,
+                    "MKV local vérifié a été conservé",
+                ),
+            ):
+                service.execute(plan)
+
+            recovery_directories = list(root.glob("movie-rip-*"))
+            self.assertEqual(len(recovery_directories), 1)
+            self.assertEqual(
+                (recovery_directories[0] / "film.mkv").read_bytes(),
+                b"mkv",
+            )
+            self.assertFalse(plan.output.exists())
 
     def test_progress_is_global_monotone_and_reaches_publication(self) -> None:
         with TemporaryDirectory() as temporary_directory:

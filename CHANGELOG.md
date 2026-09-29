@@ -18,7 +18,12 @@
 - nom des médias renseignés normalisé en `titre_normalisé.extension`, sans
   année ni identifiant de service dans le nom de fichier ;
 - formats acceptés par `tag` issus du catalogue central et limités aux
-  conteneurs dont les informations et la jaquette sont vérifiables.
+  conteneurs dont les informations et la jaquette sont vérifiables ;
+- `rip` extrait et vérifie désormais le MKV localement avant de le copier et de
+  le publier atomiquement sur la destination, ce qui évite les verrous de
+  lecture observés sur certains partages SMB Synology ;
+- un MKV local déjà vérifié est conservé et signalé si sa publication réseau
+  échoue, afin de ne jamais imposer une nouvelle lecture du disque.
 
 ## 0.2.0 — 2026-09-28
 

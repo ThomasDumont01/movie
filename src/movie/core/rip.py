@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
@@ -166,11 +168,14 @@ class RipService:
         """Écrit en staging, vérifie, puis publie sans écrasement."""
 
         prepare_destination(plan.output)
-        _ensure_free_space(plan)
-        with tempfile.TemporaryDirectory(
-            prefix=".movie-staging-", dir=plan.output.parent
-        ) as work_directory:
-            staging = Path(work_directory)
+        staging_root = Path(tempfile.gettempdir()).resolve()
+        _ensure_free_space(plan, staging_root)
+        staging = Path(tempfile.mkdtemp(prefix="movie-rip-", dir=staging_root))
+        staged_file: Path | None = None
+        verified = False
+        published = False
+        preserve_staging = False
+        try:
             warnings: list[str] = []
             extraction_end = 0.90
             make_mkv_run = self.makemkv.rip_title(
@@ -195,6 +200,7 @@ class RipService:
             )
             source_media = self.probe.probe(staged_file)
             warnings.extend(_validate_media(plan.title, source_media))
+            verified = True
             verification_end = extraction_end + 0.04
             _report_stage(
                 on_progress,
@@ -206,19 +212,50 @@ class RipService:
                 on_progress,
                 "Publication du fichier final",
                 0.0,
-                total_fraction=0.99,
+                total_fraction=verification_end,
             )
-            _publish_without_overwrite(staged_file, plan.output)
+
+            def report_copy_progress(fraction: float) -> None:
+                _report_stage(
+                    on_progress,
+                    "Copie vers la destination",
+                    fraction,
+                    total_fraction=verification_end + 0.05 * fraction,
+                )
+
+            _publish_without_overwrite(
+                staged_file,
+                plan.output,
+                on_copy_progress=(
+                    report_copy_progress if on_progress is not None else None
+                ),
+            )
+            published = True
             _report_stage(
                 on_progress,
                 "Publication du fichier final",
                 1.0,
                 total_fraction=1.0,
             )
+        except MovieError as error:
+            if (
+                verified
+                and not published
+                and staged_file is not None
+                and staged_file.is_file()
+            ):
+                preserve_staging = True
+                raise MovieError(
+                    f"{error} Le MKV local vérifié a été conservé ici : {staged_file}"
+                ) from error
+            raise
+        finally:
+            if not preserve_staging:
+                shutil.rmtree(staging, ignore_errors=True)
 
         return RipResult(
             output=plan.output,
-            media=source_media,
+            media=replace(source_media, path=plan.output),
             warnings=tuple(dict.fromkeys(warnings)),
         )
 
@@ -234,13 +271,20 @@ def _safe_filename(title: DiscTitle) -> str:
     return candidate
 
 
-def _ensure_free_space(plan: RipPlan) -> None:
+def _ensure_free_space(plan: RipPlan, staging_root: Path) -> None:
     """Refuse avant l'extraction une destination manifestement trop petite."""
 
     if not plan.title.size_bytes:
         return
+    required = rip_required_bytes(plan.title)
     ensure_free_space(
         plan.output.parent,
-        rip_required_bytes(plan.title),
+        required,
         operation="une numérisation sûre",
     )
+    if staging_root.stat().st_dev != plan.output.parent.stat().st_dev:
+        ensure_free_space(
+            staging_root,
+            required,
+            operation="la copie temporaire locale du disque",
+        )
