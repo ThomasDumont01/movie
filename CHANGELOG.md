@@ -2,6 +2,9 @@
 
 ## Non publié
 
+- `convert` copie désormais directement le flux vidéo lorsque la source est déjà
+  en H.264 et que la sortie est MP4, M4V, MOV, TS ou MTS : aucune recompression
+  d'image, qualité visuelle source conservée et traitement nettement accéléré ;
 - `convert` demande désormais toujours explicitement le format de sortie, même
   avec `auto_run` ; la configuration reste la valeur proposée par défaut.
 - les entrées TS, MTS et M2TS forcent désormais le démultiplexeur MPEG-TS lorsque

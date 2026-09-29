@@ -10,10 +10,38 @@ from movie.core.models import (
     MovieError,
     OutputFormat,
     OutputQuality,
+    ProbedMedia,
     ProgressUpdate,
 )
 from movie.ffmpeg import find_ffmpeg, run_ffmpeg
 from movie.formats import EncodingFamily, input_format_hint, output_spec
+
+_H264_CODEC_NAMES = frozenset({"h264", "avc", "avc1"})
+
+
+def copies_video_without_reencoding(
+    source_media: ProbedMedia | None,
+    output_format: OutputFormat,
+) -> bool:
+    """Indique si le flux vidéo H.264 peut être remuxé sans perte."""
+
+    if source_media is None:
+        return False
+    if output_spec(output_format).encoding is not EncodingFamily.H264:
+        return False
+    video_stream = next(
+        (
+            stream
+            for stream in source_media.streams
+            if stream.kind == "video" and not stream.is_artwork
+        ),
+        None,
+    )
+    return (
+        video_stream is not None
+        and video_stream.codec is not None
+        and video_stream.codec.casefold() in _H264_CODEC_NAMES
+    )
 
 
 class MediaConverter:
@@ -46,6 +74,7 @@ class MediaConverter:
         output_format: OutputFormat,
         quality: OutputQuality,
         duration_seconds: float | None = None,
+        source_media: ProbedMedia | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path:
         spec = output_spec(output_format)
@@ -57,6 +86,7 @@ class MediaConverter:
                 destination,
                 output_format,
                 quality,
+                source_media,
             )
 
         command.extend(("-progress", "pipe:1", "-nostats", "-y", str(destination)))
@@ -103,6 +133,7 @@ class MediaConverter:
         destination: Path,
         output_format: OutputFormat,
         quality: OutputQuality,
+        source_media: ProbedMedia | None,
     ) -> list[str]:
         spec = output_spec(output_format)
         if quality is OutputQuality.SOURCE:
@@ -123,7 +154,15 @@ class MediaConverter:
             )
         )
         if spec.encoding is EncodingFamily.H264:
-            self._add_h264_options(command, output_format, quality)
+            self._add_h264_options(
+                command,
+                output_format,
+                quality,
+                copy_video=copies_video_without_reencoding(
+                    source_media,
+                    output_format,
+                ),
+            )
         elif spec.encoding is EncodingFamily.VP9:
             crf, audio_bitrate = self._profile(self._VP9_PROFILES, quality, spec.label)
             command.extend(
@@ -160,6 +199,8 @@ class MediaConverter:
         command: list[str],
         output_format: OutputFormat,
         quality: OutputQuality,
+        *,
+        copy_video: bool,
     ) -> None:
         spec = output_spec(output_format)
         crf, audio_bitrate = self._profile(
@@ -167,22 +208,22 @@ class MediaConverter:
             quality,
             spec.label,
         )
-        command.extend(
-            (
-                "-c:v:0",
-                "libx264",
-                "-preset:v:0",
-                "medium",
-                "-crf:v:0",
-                str(crf),
-                "-pix_fmt:v:0",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-b:a",
-                audio_bitrate,
+        if copy_video:
+            command.extend(("-c:v:0", "copy"))
+        else:
+            command.extend(
+                (
+                    "-c:v:0",
+                    "libx264",
+                    "-preset:v:0",
+                    "medium",
+                    "-crf:v:0",
+                    str(crf),
+                    "-pix_fmt:v:0",
+                    "yuv420p",
+                )
             )
-        )
+        command.extend(("-c:a", "aac", "-b:a", audio_bitrate))
         if output_format in {OutputFormat.TS, OutputFormat.MTS}:
             command.extend(("-f", "mpegts"))
         else:

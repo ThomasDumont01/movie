@@ -31,8 +31,96 @@ FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
 
 
+def _video_frame_hashes(path: Path) -> list[str]:
+    """Retourne les empreintes des images décodées, sans dépendre des horodatages."""
+
+    assert FFMPEG is not None
+    input_format = (
+        "mpegts" if path.suffix.casefold() in {".mts", ".m2ts", ".ts"} else "mov"
+    )
+    completed = subprocess.run(
+        [
+            FFMPEG,
+            "-v",
+            "error",
+            "-f",
+            input_format,
+            "-i",
+            str(path),
+            "-map",
+            "0:V:0",
+            "-f",
+            "framemd5",
+            "-",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(completed.stderr)
+    return [
+        line.rsplit(",", maxsplit=1)[-1].strip()
+        for line in completed.stdout.splitlines()
+        if line and not line.startswith("#")
+    ]
+
+
 @skipUnless(FFMPEG and FFPROBE, "FFmpeg et ffprobe ne sont pas installés")
 class FfmpegIntegrationTests(TestCase):
+    def test_h264_mp4_smart_copy_preserves_every_video_frame(self) -> None:
+        assert FFMPEG is not None
+        assert FFPROBE is not None
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.m2ts"
+            output = directory / "output.mp4"
+            generated = subprocess.run(
+                [
+                    FFMPEG,
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=size=64x64:rate=10:duration=1",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:duration=1",
+                    "-shortest",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "ac3",
+                    "-f",
+                    "mpegts",
+                    str(source),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            source_media = MediaProbe(FFPROBE).probe(source)
+
+            MediaConverter(FFMPEG).convert(
+                source,
+                output,
+                output_format=OutputFormat.MP4,
+                quality=OutputQuality.BALANCED,
+                source_media=source_media,
+            )
+
+            output_media = MediaProbe(FFPROBE).probe(output)
+            self.assertEqual(output_media.streams[0].codec, "h264")
+            self.assertEqual(
+                _video_frame_hashes(source),
+                _video_frame_hashes(output),
+            )
+
     def test_real_rip_verification_accepts_makemkv_removing_empty_subtitle(
         self,
     ) -> None:

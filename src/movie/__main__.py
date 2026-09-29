@@ -12,7 +12,7 @@ from typing import Any
 
 from movie import __version__
 from movie.config import MovieConfig, config_path, load_config, save_config
-from movie.conversion import MediaConverter
+from movie.conversion import MediaConverter, copies_video_without_reencoding
 from movie.core.convert import (
     ConversionService,
     build_convert_plan,
@@ -27,6 +27,7 @@ from movie.core.models import (
     MovieMetadata,
     OutputFormat,
     OutputQuality,
+    ProbedMedia,
 )
 from movie.core.rip import (
     RipService,
@@ -546,10 +547,12 @@ def _convert() -> int:
     print(f"  Source      : {plan.source}")
     if plan.iso_title is not None:
         print(f"  Titre ISO   : {_format_title(plan.iso_title)}")
-    print(
-        "  Conversion  : "
-        f"{_output_description(plan.output_format, plan.output_quality)}"
+    conversion_description = _output_description(
+        plan.output_format,
+        plan.output_quality,
+        plan.source_media,
     )
+    print(f"  Conversion  : {conversion_description}")
     print(f"  Destination : {plan.output}")
 
     if not config.auto_run and not _prompt_yes_no("Lancer cette conversion ?"):
@@ -888,6 +891,7 @@ def _prompt_conversion_quality(
 def _output_description(
     output_format: OutputFormat,
     output_quality: OutputQuality,
+    source_media: ProbedMedia | None = None,
 ) -> str:
     spec = output_spec(output_format)
     if spec.copies_source:
@@ -898,6 +902,11 @@ def _output_description(
         OutputQuality.COMPACT: "compact",
     }
     profile = quality_labels.get(output_quality, output_quality.value)
+    if copies_video_without_reencoding(source_media, output_format):
+        return (
+            f"{spec.label} · vidéo H.264 copiée sans réencodage · "
+            f"audio AAC, profil {profile}"
+        )
     return f"{spec.label} · {spec.codec_description} · profil {profile}"
 
 

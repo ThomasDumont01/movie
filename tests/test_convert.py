@@ -403,9 +403,10 @@ class _FakeConverter:
         output_format: OutputFormat,
         quality: OutputQuality,
         duration_seconds: float | None = None,
+        source_media: ProbedMedia | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path:
-        del source, output_format, quality, duration_seconds
+        del source, output_format, quality, duration_seconds, source_media
         destination.write_bytes(b"converted")
         if on_progress is not None:
             on_progress(ProgressUpdate("Conversion", None, 1.0, 1.0))

@@ -74,6 +74,7 @@ class _ConverterBackend(Protocol):
         output_format: OutputFormat,
         quality: OutputQuality,
         duration_seconds: float | None = None,
+        source_media: ProbedMedia | None = None,
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path: ...
 
@@ -249,6 +250,7 @@ class ConversionService:
                     output_format=plan.output_format,
                     quality=plan.output_quality,
                     duration_seconds=source_media.duration_seconds,
+                    source_media=source_media,
                     on_progress=phase_callback(
                         on_progress,
                         start=source_ready,

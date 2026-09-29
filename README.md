@@ -171,7 +171,7 @@ valides, lisibles et contrôlables :
 | TS | H.264 + AAC | transport ou diffusion MPEG-TS |
 | MTS | H.264 + AAC | caméscope ou fichier de transport MPEG-TS |
 
-Pour chaque sortie réencodée, Movie propose trois priorités :
+Pour chaque sortie nécessitant un encodage, Movie propose trois priorités :
 
 | Famille | Haute qualité | Équilibré | Compact |
 | --- | --- | --- | --- |
@@ -179,10 +179,19 @@ Pour chaque sortie réencodée, Movie propose trois priorités :
 | WebM | VP9 CRF 20, Opus 192 kbit/s | VP9 CRF 30, Opus 128 kbit/s | VP9 CRF 38, Opus 96 kbit/s |
 | AVI, MPG, ASF, WMV, FLV | qualité 2, audio 320 kbit/s | qualité 4, audio 192 kbit/s | qualité 7, audio 128 kbit/s |
 
+Pour MP4, M4V, MOV, TS et MTS, une vidéo source déjà encodée en H.264 est
+automatiquement copiée dans le nouveau conteneur sans être décodée ni recompressée :
+sa qualité d'image reste strictement celle de la source et la conversion est bien
+plus rapide. Le profil choisi règle alors uniquement l'encodage audio en AAC.
+Une vidéo utilisant un autre codec est réencodée en H.264 selon le profil choisi.
+
 Le profil équilibré en MP4 reste le meilleur choix par défaut. Un format ancien
 ne rend pas une vidéo meilleure ; AVI, MPG, ASF, WMV et FLV existent uniquement
-pour les appareils qui les imposent. MKV est le seul choix proposé en copie directe,
-car c'est le conteneur d'archive le plus apte à conserver les pistes hétérogènes.
+pour les appareils qui les imposent. MKV reste le seul choix qui copie directement
+l'ensemble du média, car c'est le conteneur d'archive le plus apte à conserver les
+pistes hétérogènes. Dans un MP4, l'image H.264 peut rester sans perte, mais les
+pistes audio incompatibles sont converties en AAC et les sous-titres non compatibles
+ne peuvent pas tous être conservés.
 
 Une ISO destinée au MKV est extraite puis publiée directement, sans remuxage
 inutile. Pour toute autre sortie, elle est d'abord extraite en MKV temporaire,

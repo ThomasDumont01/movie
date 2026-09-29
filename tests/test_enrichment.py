@@ -218,6 +218,44 @@ class MediaTaggerTests(TestCase):
 
 class MediaConverterTests(TestCase):
     @patch("movie.ffmpeg.subprocess.run")
+    def test_h264_video_is_copied_without_reencoding(self, run: MagicMock) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.m2ts"
+            destination = directory / "film.mp4"
+            source_media = ProbedMedia(
+                source,
+                120,
+                ("video", "audio"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "eac3"),
+                ),
+            )
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                destination.write_bytes(b"mp4")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaConverter("ffmpeg-test").convert(
+                source,
+                destination,
+                output_format=OutputFormat.MP4,
+                quality=OutputQuality.BALANCED,
+                source_media=source_media,
+            )
+
+            command = run.call_args.args[0]
+            video_codec_index = command.index("-c:v:0")
+            self.assertEqual(command[video_codec_index + 1], "copy")
+            self.assertNotIn("libx264", command)
+            self.assertNotIn("-crf:v:0", command)
+            self.assertNotIn("-preset:v:0", command)
+            self.assertIn("aac", command)
+
+    @patch("movie.ffmpeg.subprocess.run")
     def test_m2ts_input_forces_the_mpegts_demuxer(self, run: MagicMock) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
@@ -250,11 +288,22 @@ class MediaConverterTests(TestCase):
                 return CompletedProcess(command, 0, "", "")
 
             run.side_effect = complete
+            source_media = ProbedMedia(
+                directory / "source.mkv",
+                120,
+                ("video", "audio"),
+                0,
+                streams=(
+                    MediaStream("video", codec="mpeg2video"),
+                    MediaStream("audio", "fra", "ac3"),
+                ),
+            )
             result = MediaConverter("ffmpeg-test").convert(
                 directory / "source.mkv",
                 destination,
                 output_format=OutputFormat.MP4,
                 quality=OutputQuality.HIGH,
+                source_media=source_media,
             )
 
             self.assertEqual(result, destination)
