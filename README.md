@@ -31,7 +31,7 @@ Pour choisir sans réfléchir :
 
 - un DVD, Blu-ray ou UHD à archiver fidèlement : `uv run movie rip` ;
 - un fichier ou une ISO à changer de format : `uv run movie convert` ;
-- un titre, une année ou une jaquette à ajouter : `uv run movie tag` ;
+- un titre, une date ou une jaquette à ajouter : `uv run movie tag` ;
 - seulement voir le contenu d'un disque vidéo : `uv run movie scan`.
 
 Tu peux coller un chemin ou glisser un fichier depuis Finder dans Terminal ;
@@ -277,14 +277,16 @@ star_wars_l_ascension_de_skywalker.mkv
 Choisis `manuel`, puis renseigne :
 
 - le titre, obligatoire ;
-- l'année, facultative ;
+- la date ou l'année, facultative (`26/08/1995`, `26 août 1995` et `1995`
+  sont acceptés) ;
 - la description, facultative ;
 - les genres, facultatifs ;
 - une jaquette locale JPEG, PNG ou WebP, facultative ;
 - un arrière-plan panoramique local JPEG, PNG ou WebP, facultatif.
 
 Le fichier reçoit le même nom normalisé. Par exemple, `La Clusaz Noël` devient
-`la_clusaz_noel.mkv` ; son année reste enregistrée dans les métadonnées. Les
+`la_clusaz_noel.mkv` ; sa date complète, lorsqu'elle est indiquée, reste
+enregistrée dans les métadonnées au format standard. Les
 champs laissés vides effacent les anciennes valeurs correspondantes, ce qui
 permet aussi de retirer une ancienne identification TMDB.
 
@@ -399,7 +401,7 @@ uv run pyright
 
 État vérifié le 30 septembre 2026 pour la version 0.3.0 :
 
-- 205 tests et 85 sous-tests réussissent ;
+- 210 tests et 88 sous-tests réussissent ;
 - la couverture automatisée atteint 86 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;

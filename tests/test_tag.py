@@ -67,6 +67,36 @@ class TagPlanTests(TestCase):
                 "https://www.themoviedb.org/movie/299534-avengers-endgame",
             )
 
+    def test_complete_release_date_is_normalized_with_its_year(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"source")
+
+            plan = build_tag_plan(
+                source,
+                MovieMetadata(title="Notre mariage", release_date="1995-08-26"),
+            )
+
+            self.assertEqual(plan.metadata.year, 1995)
+            self.assertEqual(plan.metadata.release_date, "1995-08-26")
+            self.assertEqual(plan.metadata.date_value, "1995-08-26")
+
+    def test_invalid_or_inconsistent_release_date_is_refused(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory) / "film.mkv"
+            source.write_bytes(b"source")
+
+            with self.assertRaisesRegex(MovieError, "date ISO valide"):
+                build_tag_plan(
+                    source,
+                    MovieMetadata(title="Film", release_date="1995-02-31"),
+                )
+            with self.assertRaisesRegex(MovieError, "ne correspondent pas"):
+                build_tag_plan(
+                    source,
+                    MovieMetadata(title="Film", year=1994, release_date="1995-08-26"),
+                )
+
     def test_supported_formats_have_metadata_and_artwork_guarantees(self) -> None:
         self.assertEqual(
             taggable_suffixes(),
@@ -426,7 +456,7 @@ class _TagProbe:
         if path.is_file() and path.read_bytes() == b"tagged":
             tags = (
                 ("title", self.metadata.title),
-                ("date", str(self.metadata.year)),
+                ("date", self.metadata.date_value or ""),
                 ("description", self.metadata.summary or ""),
                 ("genre", ", ".join(self.metadata.genres)),
                 ("comment", f"TMDB: {self.metadata.source_url}"),

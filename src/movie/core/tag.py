@@ -8,6 +8,7 @@ import tempfile
 import unicodedata
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from typing import Protocol
 
@@ -103,6 +104,20 @@ def build_tag_plan(
         raise MovieError("Un titre est nécessaire pour écrire les métadonnées.")
     if metadata.year is not None and not 1 <= metadata.year <= 9999:
         raise MovieError("L'année doit être comprise entre 1 et 9999.")
+    release_date = metadata.release_date.strip() if metadata.release_date else None
+    normalized_year = metadata.year
+    if release_date is not None:
+        try:
+            parsed_date = date.fromisoformat(release_date)
+        except ValueError as error:
+            raise MovieError(
+                "La date doit être une date ISO valide (AAAA-MM-JJ)."
+            ) from error
+        release_date = parsed_date.isoformat()
+        if metadata.year is not None and metadata.year != parsed_date.year:
+            raise MovieError("L'année et la date complète ne correspondent pas.")
+        if normalized_year is None:
+            normalized_year = parsed_date.year
     if metadata.poster_url and metadata.poster_path:
         raise MovieError("Choisis une jaquette distante ou locale, pas les deux.")
     if metadata.fanart_url and metadata.fanart_path:
@@ -111,6 +126,8 @@ def build_tag_plan(
     normalized = replace(
         metadata,
         title=title,
+        year=normalized_year,
+        release_date=release_date,
         summary=metadata.summary.strip() if metadata.summary else None,
         genres=tuple(
             dict.fromkeys(genre.strip() for genre in metadata.genres if genre.strip())

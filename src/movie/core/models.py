@@ -124,6 +124,7 @@ class MovieMetadata:
 
     title: str
     year: int | None = None
+    release_date: str | None = None
     summary: str | None = None
     genres: tuple[str, ...] = ()
     source_url: str | None = None
@@ -131,6 +132,12 @@ class MovieMetadata:
     poster_path: Path | None = None
     fanart_url: str | None = None
     fanart_path: Path | None = None
+
+    @property
+    def date_value(self) -> str | None:
+        """Date ISO complète lorsqu'elle existe, sinon année seule."""
+
+        return self.release_date or (str(self.year) if self.year is not None else None)
 
     @property
     def has_artwork(self) -> bool:

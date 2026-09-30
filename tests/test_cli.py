@@ -18,6 +18,7 @@ from movie.__main__ import (
     _prompt_for_drive,
     _prompt_for_title,
     _prompt_optional_path,
+    _prompt_optional_release_date,
     _prompt_path,
     _prompt_yes_no,
     _resolve_conversion_settings,
@@ -80,6 +81,24 @@ class InteractivePromptTests(TestCase):
         self.assertIs(selected_format, OutputFormat.MKV)
         self.assertIs(selected_quality, OutputQuality.SOURCE)
         prompt.assert_called_once()
+
+    def test_release_date_accepts_french_numeric_and_named_dates(self) -> None:
+        for answer in ("26/08/1995", "26 août 1995", "1995-08-26"):
+            with (
+                self.subTest(answer=answer),
+                patch("builtins.input", return_value=answer),
+            ):
+                self.assertEqual(
+                    _prompt_optional_release_date(),
+                    "1995-08-26",
+                )
+
+    @patch("builtins.input", side_effect=["31/02/1995", "1995"])
+    def test_release_date_repeats_after_an_invalid_date(self, _input: object) -> None:
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(_prompt_optional_release_date(), "1995")
+        self.assertIn("date valide", output.getvalue())
 
     @patch("builtins.input", return_value="")
     def test_long_choice_list_is_rendered_on_separate_lines(
@@ -444,7 +463,7 @@ class CommandFlowTests(TestCase):
                 str(source),
                 "manuel",
                 "Vacances en Bretagne",
-                "2024",
+                "14 juillet 2024",
                 "Film familial",
                 "Famille, Voyage",
                 "",
@@ -461,6 +480,8 @@ class CommandFlowTests(TestCase):
             plan = service_factory.return_value.execute.call_args.args[0]
             self.assertEqual(plan.metadata.title, "Vacances en Bretagne")
             self.assertEqual(plan.metadata.genres, ("Famille", "Voyage"))
+            self.assertEqual(plan.metadata.year, 2024)
+            self.assertEqual(plan.metadata.release_date, "2024-07-14")
             self.assertEqual(plan.output.name, "vacances_en_bretagne.mkv")
             self.assertIn("Métadonnées écrites et vérifiées", output.getvalue())
 

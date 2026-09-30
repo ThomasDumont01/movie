@@ -65,7 +65,7 @@ def metadata_arguments(metadata: MovieMetadata) -> tuple[str, ...]:
         "-metadata",
         f"title={metadata.title}",
         "-metadata",
-        f"date={metadata.year or ''}",
+        f"date={metadata.date_value or ''}",
         "-metadata",
         "year=",
         "-metadata",

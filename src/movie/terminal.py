@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 import threading
+import unicodedata
 from collections.abc import Callable, Sequence
+from datetime import date
 from pathlib import Path
 from time import monotonic
 from typing import TextIO
@@ -156,19 +159,74 @@ def _prompt_optional_text(label: str) -> str | None:
     return answer or None
 
 
-def _prompt_optional_year(label: str = "Année") -> int | None:
+_FRENCH_MONTHS = {
+    "janvier": 1,
+    "fevrier": 2,
+    "mars": 3,
+    "avril": 4,
+    "mai": 5,
+    "juin": 6,
+    "juillet": 7,
+    "aout": 8,
+    "septembre": 9,
+    "octobre": 10,
+    "novembre": 11,
+    "decembre": 12,
+}
+
+
+def _prompt_optional_release_date(label: str = "Date ou année") -> str | None:
+    """Accepte une année ou une date française et renvoie une valeur ISO."""
+
     while True:
         answer = _read_answer(f"{label} [facultatif] : ")
         if not answer:
             return None
         try:
-            year = int(answer)
+            return _normalized_release_date(answer)
         except ValueError:
-            print("Saisis une année entière, ou laisse vide.")
-            continue
+            print(
+                "Saisis une année (1995) ou une date valide "
+                "(26/08/1995 ou 26 août 1995), ou laisse vide."
+            )
+
+
+def _normalized_release_date(value: str) -> str:
+    """Normalise les dates de saisie courantes sans interprétation ambiguë."""
+
+    cleaned = " ".join(value.strip().split())
+    if cleaned.isdecimal():
+        year = int(cleaned)
         if 1 <= year <= 9999:
-            return year
-        print("L'année doit être comprise entre 1 et 9999.")
+            return str(year)
+        raise ValueError("invalid year")
+
+    iso_match = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", cleaned)
+    if iso_match:
+        return _iso_date(*(int(part) for part in iso_match.groups()))
+
+    numeric_match = re.fullmatch(r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})", cleaned)
+    if numeric_match:
+        day, month, year = (int(part) for part in numeric_match.groups())
+        return _iso_date(year, month, day)
+
+    ascii_value = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", cleaned.casefold())
+        if not unicodedata.combining(character)
+    )
+    named_match = re.fullmatch(r"(\d{1,2})\s+([a-z]+)\s+(\d{4})", ascii_value)
+    if named_match:
+        day_text, month_text, year_text = named_match.groups()
+        month = _FRENCH_MONTHS.get(month_text)
+        if month is not None:
+            return _iso_date(int(year_text), month, int(day_text))
+
+    raise ValueError("unsupported date")
+
+
+def _iso_date(year: int, month: int, day: int) -> str:
+    return date(year, month, day).isoformat()
 
 
 def _prompt_genres() -> tuple[str, ...]:

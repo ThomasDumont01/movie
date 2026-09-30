@@ -37,6 +37,7 @@ class MetadataParserTests(TestCase):
 
         self.assertEqual(metadata.title, "Mon Film")
         self.assertEqual(metadata.year, 2019)
+        self.assertEqual(metadata.release_date, "2019-12-18")
         self.assertEqual(metadata.genres, ("Aventure", "Science-fiction"))
         self.assertEqual(metadata.poster_url, "https://image.example/affiche.jpg")
 
@@ -73,6 +74,7 @@ class MetadataParserTests(TestCase):
         )
 
         self.assertEqual(metadata.year, 2021)
+        self.assertEqual(metadata.release_date, "2021-05-03")
         self.assertEqual(metadata.genres, ("Drame",))
 
     def test_only_direct_https_tmdb_movie_links_are_accepted(self) -> None:

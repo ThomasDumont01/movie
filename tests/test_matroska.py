@@ -74,6 +74,26 @@ class MatroskaTagTests(TestCase):
             self.assertNotIn("DATE_RELEASED", values)
             self.assertEqual(values["DESCRIPTION"], "Résumé")
 
+    def test_complete_release_date_is_written(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            tags = Path(temporary_directory) / "tags.xml"
+            tags.write_text("<Tags><Tag><Targets /></Tag></Tags>", encoding="utf-8")
+
+            _update_global_tags(
+                tags,
+                MovieMetadata(
+                    title="Notre mariage",
+                    year=1995,
+                    release_date="1995-08-26",
+                ),
+            )
+
+            values = {
+                simple.findtext("Name"): simple.findtext("String")
+                for simple in ElementTree.parse(tags).getroot().findall("./Tag/Simple")
+            }
+            self.assertEqual(values["DATE_RELEASED"], "1995-08-26")
+
     def test_fanart_detection_accepts_filename_and_french_description(self) -> None:
         by_name = _Attachment(1, "fanart.jpg", "image/jpeg", "")
         by_description = _Attachment(2, "image.jpg", "image/jpeg", "Arrière-plan")

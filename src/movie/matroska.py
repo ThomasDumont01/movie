@@ -298,7 +298,7 @@ def _update_global_tags(path: Path, metadata: MovieMetadata) -> None:
 
     values = (
         ("TITLE", metadata.title),
-        ("DATE_RELEASED", str(metadata.year) if metadata.year is not None else None),
+        ("DATE_RELEASED", metadata.date_value),
         ("DESCRIPTION", (metadata.summary or "")[:4000] or None),
         ("SYNOPSIS", (metadata.summary or "")[:4000] or None),
         ("GENRE", ", ".join(metadata.genres) or None),

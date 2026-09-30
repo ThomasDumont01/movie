@@ -71,8 +71,8 @@ from movie.terminal import (
     _prompt_optional_existing_file,
     _prompt_optional_int,
     _prompt_optional_path,
+    _prompt_optional_release_date,
     _prompt_optional_text,
-    _prompt_optional_year,
     _prompt_path,
     _prompt_required_text,
     _prompt_yes_no,
@@ -618,11 +618,11 @@ def _tag() -> int:
 
     plan = build_tag_plan(source, metadata)
     _print_subheading("Récapitulatif")
-    year = f" ({plan.metadata.year})" if plan.metadata.year else ""
+    date_label = _metadata_date_label(plan.metadata)
     print(f"  Fichier      : {plan.source}")
     if plan.output != plan.source:
         print(f"  Nouveau nom  : {plan.output.name}")
-    print(f"  Titre        : {plan.metadata.title}{year}")
+    print(f"  Titre        : {plan.metadata.title}{date_label}")
     print(
         f"  Informations : {'TMDB' if plan.metadata.source_url else 'saisie manuelle'}"
     )
@@ -669,7 +669,7 @@ def _tag() -> int:
 
     print("\n✓ Métadonnées écrites et vérifiées")
     print(f"  Fichier : {result.output}")
-    print(f"  Titre   : {plan.metadata.title}{year}")
+    print(f"  Titre   : {plan.metadata.title}{date_label}")
     for warning in result.warnings:
         print(f"  ⚠ {warning}")
     return 0
@@ -679,7 +679,9 @@ def _manual_metadata(source: Path) -> MovieMetadata:
     _print_subheading("Saisie manuelle")
     proposed_title = " ".join(source.stem.replace("_", " ").split())
     title = _prompt_required_text("Titre", default=proposed_title)
-    year = _prompt_optional_year()
+    date_value = _prompt_optional_release_date()
+    year = int(date_value[:4]) if date_value else None
+    release_date = date_value if date_value and "-" in date_value else None
     summary = _prompt_optional_text("Description")
     genres = _prompt_genres()
     poster_path = _prompt_optional_existing_file("Jaquette locale JPEG, PNG ou WebP")
@@ -689,6 +691,7 @@ def _manual_metadata(source: Path) -> MovieMetadata:
     return MovieMetadata(
         title=title,
         year=year,
+        release_date=release_date,
         summary=summary,
         genres=genres,
         poster_path=poster_path,
@@ -740,6 +743,15 @@ def _identify_movie(
         if _prompt_yes_no("Utiliser cette fiche ?", default=True):
             return metadata
         url = None
+
+
+def _metadata_date_label(metadata: MovieMetadata) -> str:
+    if metadata.release_date:
+        year, month, day = metadata.release_date.split("-")
+        return f" ({day}/{month}/{year})"
+    if metadata.year is not None:
+        return f" ({metadata.year})"
+    return ""
 
 
 def _resolve_drive(

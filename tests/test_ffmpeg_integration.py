@@ -678,6 +678,7 @@ class FfmpegIntegrationTests(TestCase):
             metadata = MovieMetadata(
                 title="Archive personnelle",
                 year=2026,
+                release_date="2026-09-30",
                 summary="Souvenir familial",
                 genres=("Famille", "Voyage"),
                 poster_path=poster,
@@ -707,3 +708,5 @@ class FfmpegIntegrationTests(TestCase):
                         key.casefold(): value for key, value in result.media.format_tags
                     }
                     self.assertEqual(tags.get("title"), metadata.title)
+                    stored_date = tags.get("date_released") or tags.get("date", "")
+                    self.assertIn("2026-09-30", stored_date)

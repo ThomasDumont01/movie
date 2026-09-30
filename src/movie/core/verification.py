@@ -204,10 +204,11 @@ def validate_metadata(metadata: MovieMetadata, media: ProbedMedia) -> None:
     if tags.get("title") != metadata.title:
         raise MovieError("Le titre n'a pas été retrouvé après écriture.")
     stored_date = tags.get("date_released") or tags.get("date") or tags.get("year", "")
-    if metadata.year is not None and str(metadata.year) not in stored_date:
-        raise MovieError("L'année n'a pas été retrouvée après écriture.")
-    if metadata.year is None and stored_date:
-        raise MovieError("L'ancienne année n'a pas été retirée.")
+    expected_date = metadata.date_value
+    if expected_date is not None and expected_date not in stored_date:
+        raise MovieError("La date n'a pas été retrouvée après écriture.")
+    if expected_date is None and stored_date:
+        raise MovieError("L'ancienne date n'a pas été retirée.")
     if metadata.summary and metadata.summary not in tags.get("description", ""):
         raise MovieError("La description n'a pas été retrouvée après écriture.")
     if metadata.summary is None and tags.get("description"):

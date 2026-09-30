@@ -18,6 +18,9 @@
 - les sources TS, MTS et M2TS destinées au MKV sont remuxées avec MKVToolNix,
   ce qui tolère leurs paquets vidéo sans timestamp tout en conservant vidéo,
   audios et sous-titres sans réencodage.
+- la saisie manuelle de `tag` accepte désormais une date complète en notation
+  française ou ISO, en plus d'une année seule, puis écrit et vérifie cette date
+  exacte dans les métadonnées du conteneur.
 
 ## 0.3.0 — 2026-09-29
 

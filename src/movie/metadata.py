@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date as calendar_date
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import quote_plus, urlsplit
@@ -77,6 +78,7 @@ def parse_movie_page(html: str, source_url: str) -> MovieMetadata:
 
     date = _publication_date(structured) if structured else None
     year = _extract_year(date or raw_title or title)
+    release_date = _extract_release_date(date)
     summary = (
         _text_value(structured.get("description")) if structured else None
     ) or parser.meta.get("og:description")
@@ -95,6 +97,7 @@ def parse_movie_page(html: str, source_url: str) -> MovieMetadata:
     return MovieMetadata(
         title=title,
         year=year,
+        release_date=release_date,
         summary=summary.strip() if summary else None,
         genres=genres,
         source_url=source_url,
@@ -235,6 +238,18 @@ def _original_tmdb_image_url(url: str) -> str | None:
 def _extract_year(value: str) -> int | None:
     match = re.search(r"\b(18|19|20)\d{2}\b", value)
     return int(match.group(0)) if match else None
+
+
+def _extract_release_date(value: str | None) -> str | None:
+    if value is None:
+        return None
+    match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", value)
+    if match is None:
+        return None
+    try:
+        return calendar_date.fromisoformat(match.group(0)).isoformat()
+    except ValueError:
+        return None
 
 
 def _clean_title(value: str) -> str:

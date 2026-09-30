@@ -45,6 +45,7 @@ class MediaTaggerTests(TestCase):
             metadata = MovieMetadata(
                 title="Mon Film",
                 year=2024,
+                release_date="2024-05-17",
                 summary="Résumé",
                 genres=("Aventure",),
                 source_url="https://www.imdb.com/title/tt1/",
@@ -67,6 +68,7 @@ class MediaTaggerTests(TestCase):
             command = run.call_args.args[0]
             self.assertIn("copy", command)
             self.assertIn("title=Mon Film", command)
+            self.assertIn("date=2024-05-17", command)
             self.assertIn("synopsis=Résumé", command)
             self.assertNotIn("-attach", command)
 
