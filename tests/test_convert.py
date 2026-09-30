@@ -21,6 +21,7 @@ from movie.core.models import (
     ProbedMedia,
     ProgressUpdate,
 )
+from movie.core.verification import validate_conversion
 from movie.formats import OUTPUT_FORMAT_SPECS, output_spec
 
 
@@ -142,6 +143,88 @@ class ConvertPlanTests(TestCase):
                     source_media=media,
                     audio_track_index=2,
                 )
+
+    def test_mkv_language_normalization_is_non_blocking(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source_path = directory / "source.m2ts"
+            output_path = directory / "output.mkv"
+            source_path.write_bytes(b"source")
+            source = ProbedMedia(
+                source_path,
+                120,
+                ("video", "audio", "audio", "audio", "subtitle"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "eac3"),
+                    MediaStream("audio", "qaa", "eac3"),
+                    MediaStream("audio", "fra", "eac3"),
+                    MediaStream("subtitle", "fra", "dvb_subtitle"),
+                ),
+            )
+            output = ProbedMedia(
+                output_path,
+                120,
+                ("video", "audio", "audio", "audio", "subtitle"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fre", "eac3"),
+                    MediaStream("audio", "qaa", "eac3"),
+                    MediaStream("audio", "qad", "eac3"),
+                    MediaStream("subtitle", "fre", "dvb_subtitle"),
+                ),
+            )
+            plan = build_convert_plan(
+                source_path,
+                "mkv",
+                source_media=source,
+            )
+
+            warnings = validate_conversion(plan, source, output)
+
+            self.assertIn("normalisé", warnings[0])
+
+    def test_mp4_validation_accepts_all_audio_and_text_subtitles(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source_path = directory / "source.mkv"
+            source_path.write_bytes(b"source")
+            source = ProbedMedia(
+                source_path,
+                120,
+                ("video", "audio", "audio", "subtitle"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "eac3"),
+                    MediaStream("audio", "eng", "eac3"),
+                    MediaStream("subtitle", "fra", "subrip"),
+                ),
+            )
+            output_path = directory / "output.mp4"
+            output = ProbedMedia(
+                output_path,
+                120,
+                ("video", "audio", "audio", "subtitle"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "aac"),
+                    MediaStream("audio", "eng", "aac"),
+                    MediaStream("subtitle", "fra", "mov_text"),
+                ),
+            )
+            plan = build_convert_plan(
+                source_path,
+                "mp4",
+                source_media=source,
+            )
+
+            warnings = validate_conversion(plan, source, output)
+
+            self.assertEqual(warnings, ())
 
 
 class ConversionExecutionTests(TestCase):

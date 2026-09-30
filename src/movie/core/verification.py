@@ -13,7 +13,13 @@ from movie.core.models import (
     OutputFormat,
     ProbedMedia,
 )
-from movie.formats import OutputFormatSpec, output_spec, requires_video
+from movie.formats import (
+    OutputFormatSpec,
+    output_spec,
+    output_subtitle_codec,
+    requires_video,
+    subtitle_codec_supported,
+)
 
 
 def validate_source(media: ProbedMedia) -> None:
@@ -149,6 +155,7 @@ def validate_conversion(
     return _validate_video_output(
         source,
         output,
+        output_format=plan.output_format,
         spec=spec,
         audio_track_index=plan.audio_track_index,
     )
@@ -241,30 +248,45 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
         raise MovieError(
             f"Le MKV a perdu des pistes ({details}) ; rien n'a été publié."
         )
-    expected_details = Counter(
-        (stream.kind, stream.language, stream.codec)
+    expected_codecs = Counter(
+        (stream.kind, stream.codec)
         for stream in source.streams
-        if stream.kind != "attachment" and (stream.language or stream.codec)
+        if stream.kind != "attachment" and stream.codec
     )
-    actual_details = Counter(
-        (stream.kind, stream.language, stream.codec)
+    actual_codecs = Counter(
+        (stream.kind, stream.codec)
         for stream in output.streams
-        if stream.kind != "attachment" and (stream.language or stream.codec)
+        if stream.kind != "attachment" and stream.codec
     )
-    if expected_details - actual_details:
-        raise MovieError(
-            "Le MKV n'a pas conservé les codecs ou langues des pistes source."
+    if expected_codecs - actual_codecs:
+        raise MovieError("Le MKV n'a pas conservé les codecs des pistes source.")
+    expected_languages = Counter(
+        (stream.kind, stream.language)
+        for stream in source.streams
+        if stream.kind != "attachment" and stream.language
+    )
+    actual_languages = Counter(
+        (stream.kind, stream.language)
+        for stream in output.streams
+        if stream.kind != "attachment" and stream.language
+    )
+    warnings: list[str] = []
+    if expected_languages - actual_languages:
+        warnings.append(
+            "Le remuxeur MKV a normalisé une ou plusieurs étiquettes de langue ; "
+            "toutes les pistes et tous les codecs sont présents."
         )
     if source.chapter_count and output.chapter_count < source.chapter_count:
         raise MovieError("Le MKV a perdu un ou plusieurs chapitres.")
     _validate_duration(source, output, "MKV")
-    return ()
+    return tuple(warnings)
 
 
 def _validate_video_output(
     source: ProbedMedia,
     output: ProbedMedia,
     *,
+    output_format: OutputFormat,
     spec: OutputFormatSpec,
     audio_track_index: int | None,
 ) -> tuple[str, ...]:
@@ -272,6 +294,15 @@ def _validate_video_output(
     videos = tuple(stream for stream in output.streams if stream.kind == "video")
     audios = tuple(stream for stream in output.streams if stream.kind == "audio")
     source_audios = tuple(stream for stream in source.streams if stream.kind == "audio")
+    subtitles = tuple(stream for stream in output.streams if stream.kind == "subtitle")
+    source_subtitles = tuple(
+        stream for stream in source.streams if stream.kind == "subtitle"
+    )
+    expected_subtitles = tuple(
+        stream
+        for stream in source_subtitles
+        if subtitle_codec_supported(output_format, stream.codec)
+    )
     expected_audios = source_audios
     if audio_track_index is not None:
         if audio_track_index >= len(source_audios):
@@ -296,6 +327,23 @@ def _validate_video_output(
     missing_languages = _missing_languages(expected_audios, audios)
     if missing_languages and spec.preserves_audio_languages:
         raise MovieError(f"Le {label} a perdu la langue d'une piste audio.")
+    if len(subtitles) < len(expected_subtitles):
+        raise MovieError(f"Le {label} a perdu un ou plusieurs sous-titres compatibles.")
+    expected_subtitle_codecs = Counter(
+        output_subtitle_codec(output_format, stream.codec)
+        for stream in expected_subtitles
+        if stream.codec is not None
+    )
+    actual_subtitle_codecs = Counter(
+        stream.codec for stream in subtitles if stream.codec is not None
+    )
+    if expected_subtitle_codecs - actual_subtitle_codecs:
+        raise MovieError(
+            f"Le {label} n'a pas conservé le codec attendu des sous-titres."
+        )
+    missing_subtitle_languages = _missing_languages(expected_subtitles, subtitles)
+    if missing_subtitle_languages and spec.preserves_audio_languages:
+        raise MovieError(f"Le {label} a perdu la langue d'un sous-titre.")
     _validate_duration(source, output, label)
 
     warnings: list[str] = []
@@ -310,12 +358,16 @@ def _validate_video_output(
             f"Le conteneur {label} ne conserve pas toujours les étiquettes de langue "
             "des pistes audio ; les pistes elles-mêmes ont bien été vérifiées."
         )
-    subtitle_count = sum(stream.kind == "subtitle" for stream in source.streams)
-    if subtitle_count:
+    omitted_subtitle_count = len(source_subtitles) - len(expected_subtitles)
+    if omitted_subtitle_count:
         warnings.append(
-            f"{subtitle_count} piste(s) de sous-titres ne sont pas intégrées au "
-            f"{label} ; "
+            f"{omitted_subtitle_count} piste(s) de sous-titres image ne sont pas "
+            f"compatibles avec le {label} et n'ont pas été intégrées ; "
             "utilise le MKV pour les conserver sans compromis."
+        )
+    if missing_subtitle_languages:
+        warnings.append(
+            f"Le {label} ne conserve pas les langues de tous les sous-titres."
         )
     if source.chapter_count and output.chapter_count < source.chapter_count:
         if spec.preserves_chapters:

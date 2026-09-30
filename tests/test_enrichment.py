@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from movie.conversion import MediaConverter
+from movie.conversion import MediaConverter, _mkvmerge_progress_fraction
 from movie.core.models import (
     MediaStream,
     MovieError,
@@ -319,6 +319,115 @@ class MediaConverterTests(TestCase):
             self.assertEqual(mapped_streams, ["0:V:0", "0:a:1"])
             self.assertIn("-disposition:a:0", command)
             self.assertNotIn("0:a?", command)
+
+    @patch("movie.ffmpeg.subprocess.run")
+    def test_all_audio_tracks_are_preserved_by_default(self, run: MagicMock) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.m2ts"
+            destination = directory / "film.mp4"
+            source_media = ProbedMedia(
+                source,
+                120,
+                ("video", "audio", "audio", "audio"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "eac3"),
+                    MediaStream("audio", "qaa", "eac3"),
+                    MediaStream("audio", "fra", "eac3"),
+                ),
+            )
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                destination.write_bytes(b"mp4")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaConverter("ffmpeg-test").convert(
+                source,
+                destination,
+                output_format=OutputFormat.MP4,
+                quality=OutputQuality.BALANCED,
+                source_media=source_media,
+            )
+
+            command = run.call_args.args[0]
+            self.assertIn("0:a?", command)
+            self.assertNotIn("-disposition:a:0", command)
+
+    @patch("movie.ffmpeg.subprocess.run")
+    def test_mp4_preserves_compatible_text_subtitles(self, run: MagicMock) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.mkv"
+            destination = directory / "film.mp4"
+            source_media = ProbedMedia(
+                source,
+                120,
+                ("video", "audio", "subtitle", "subtitle"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "aac"),
+                    MediaStream("subtitle", "fra", "dvb_subtitle"),
+                    MediaStream("subtitle", "eng", "subrip"),
+                ),
+            )
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                destination.write_bytes(b"mp4")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaConverter("ffmpeg-test").convert(
+                source,
+                destination,
+                output_format=OutputFormat.MP4,
+                quality=OutputQuality.BALANCED,
+                source_media=source_media,
+            )
+
+            command = run.call_args.args[0]
+            mapped_streams = [
+                command[index + 1]
+                for index, argument in enumerate(command[:-1])
+                if argument == "-map"
+            ]
+            self.assertEqual(mapped_streams, ["0:V:0", "0:a?", "0:s:1"])
+            subtitle_codec_index = command.index("-c:s")
+            self.assertEqual(command[subtitle_codec_index + 1], "mov_text")
+
+    @patch("movie.conversion.subprocess.run")
+    def test_m2ts_to_mkv_uses_mkvmerge(self, run: MagicMock) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "source.m2ts"
+            destination = directory / "film.mkv"
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                destination.write_bytes(b"mkv")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaConverter(
+                "ffmpeg-test",
+                mkvmerge_executable="mkvmerge-test",
+            ).convert(
+                source,
+                destination,
+                output_format=OutputFormat.MKV,
+                quality=OutputQuality.SOURCE,
+            )
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[0], "mkvmerge-test")
+            self.assertIn("--gui-mode", command)
+            self.assertEqual(command[-2:], [str(destination), str(source)])
+
+    def test_mkvmerge_progress_is_converted_to_fraction(self) -> None:
+        self.assertEqual(_mkvmerge_progress_fraction("#GUI#progress 57%"), 0.57)
+        self.assertIsNone(_mkvmerge_progress_fraction("Multiplexing took 1 second"))
 
     @patch("movie.ffmpeg.subprocess.run")
     def test_mp4_uses_h264_aac_and_selected_profile(self, run: MagicMock) -> None:

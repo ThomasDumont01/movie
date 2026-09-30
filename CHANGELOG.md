@@ -9,11 +9,15 @@
   avec `auto_run` ; la configuration reste la valeur proposée par défaut.
 - les entrées TS, MTS et M2TS forcent désormais le démultiplexeur MPEG-TS lorsque
   nécessaire, afin de retrouver la vidéo des enregistrements dont l'en-tête est
-  mal détecté automatiquement par FFmpeg.
-- lorsqu'une sortie encodée est créée depuis une source multiaudio, `convert`
-  demande la piste à conserver, affiche sa langue, son codec et ses canaux, puis
-  vérifie que le résultat ne contient que cette piste ; le MKV continue de
-  préserver automatiquement toutes les pistes.
+  mal détecté automatiquement par FFmpeg ;
+- `convert` conserve désormais toutes les pistes audio par défaut et les encode
+  séparément dans le codec de la sortie, sans les fusionner ;
+- les sous-titres textuels compatibles sont conservés dans MP4, M4V, MOV et
+  WebM ; les sous-titres image incompatibles restent signalés et sont tous
+  préservés avec MKV ;
+- les sources TS, MTS et M2TS destinées au MKV sont remuxées avec MKVToolNix,
+  ce qui tolère leurs paquets vidéo sans timestamp tout en conservant vidéo,
+  audios et sous-titres sans réencodage.
 
 ## 0.3.0 — 2026-09-29
 

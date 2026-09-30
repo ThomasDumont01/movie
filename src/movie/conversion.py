@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
@@ -14,7 +15,15 @@ from movie.core.models import (
     ProgressUpdate,
 )
 from movie.ffmpeg import find_ffmpeg, run_ffmpeg
-from movie.formats import EncodingFamily, input_format_hint, output_spec
+from movie.formats import (
+    TRANSPORT_STREAM_SUFFIXES,
+    EncodingFamily,
+    SubtitleMode,
+    input_format_hint,
+    output_spec,
+    subtitle_codec_supported,
+)
+from movie.matroska import find_mkvmerge
 
 _H264_CODEC_NAMES = frozenset({"h264", "avc", "avc1"})
 
@@ -63,8 +72,14 @@ class MediaConverter:
         OutputQuality.COMPACT: (7, "128k"),
     }
 
-    def __init__(self, executable: str | None = None) -> None:
+    def __init__(
+        self,
+        executable: str | None = None,
+        *,
+        mkvmerge_executable: str | None = None,
+    ) -> None:
         self.executable = executable
+        self.mkvmerge_executable = mkvmerge_executable
 
     def convert(
         self,
@@ -79,6 +94,15 @@ class MediaConverter:
         on_progress: Callable[[ProgressUpdate], None] | None = None,
     ) -> Path:
         spec = output_spec(output_format)
+        if spec.copies_source and source.suffix.casefold() in TRANSPORT_STREAM_SUFFIXES:
+            if quality is not OutputQuality.SOURCE:
+                raise MovieError("Le MKV utilise obligatoirement le profil source.")
+            return _run_mkvmerge(
+                self.mkvmerge_executable or find_mkvmerge(),
+                source,
+                destination,
+                on_progress=on_progress,
+            )
         if spec.copies_source:
             command = self._mkv_command(source, destination, quality)
         else:
@@ -144,6 +168,15 @@ class MediaConverter:
                 f"Le {spec.label} nécessite un profil high, balanced ou compact."
             )
         command = self._base_command(source)
+        subtitle_ordinals = tuple(
+            ordinal
+            for ordinal, stream in enumerate(
+                stream
+                for stream in (source_media.streams if source_media else ())
+                if stream.kind == "subtitle"
+            )
+            if subtitle_codec_supported(output_format, stream.codec)
+        )
         audio_map = "0:a?" if audio_track_index is None else f"0:a:{audio_track_index}"
         command.extend(
             (
@@ -157,6 +190,8 @@ class MediaConverter:
                 "0" if spec.preserves_chapters else "-1",
             )
         )
+        for ordinal in subtitle_ordinals:
+            command.extend(("-map", f"0:s:{ordinal}"))
         if spec.encoding is EncodingFamily.H264:
             self._add_h264_options(
                 command,
@@ -196,6 +231,13 @@ class MediaConverter:
             self._add_legacy_options(command, spec.encoding, quality, spec.label)
         else:  # pragma: no cover - le catalogue est exhaustif et testé
             raise MovieError(f"Encodage non pris en charge : {spec.encoding}")
+        if subtitle_ordinals:
+            subtitle_codec = {
+                SubtitleMode.COPY: "copy",
+                SubtitleMode.MOV_TEXT: "mov_text",
+                SubtitleMode.WEBVTT: "webvtt",
+            }[spec.subtitle_mode]
+            command.extend(("-c:s", subtitle_codec))
         if audio_track_index is not None:
             command.extend(("-disposition:a:0", "default"))
         return command
@@ -280,3 +322,91 @@ class MediaConverter:
             raise MovieError(
                 f"Le {label} nécessite un profil high, balanced ou compact."
             ) from error
+
+
+def _run_mkvmerge(
+    executable: str,
+    source: Path,
+    destination: Path,
+    *,
+    on_progress: Callable[[ProgressUpdate], None] | None,
+) -> Path:
+    """Remuxe un transport stream en MKV même si certains PTS/DTS sont absents."""
+
+    command = [
+        executable,
+        "--gui-mode",
+        "--output",
+        str(destination),
+        str(source),
+    ]
+    try:
+        result = (
+            _run_mkvmerge_with_progress(command, on_progress)
+            if on_progress is not None
+            else subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        )
+    except OSError as error:
+        raise MovieError("Impossible de lancer mkvmerge.") from error
+    if result.returncode not in {0, 1}:
+        details = (result.stderr or result.stdout).strip()
+        suffix = f" : {details[-1_000:]}" if details else "."
+        raise MovieError("mkvmerge n'a pas pu créer le MKV" + suffix)
+    if not destination.is_file() or destination.stat().st_size == 0:
+        raise MovieError("mkvmerge n'a pas produit de MKV exploitable.")
+    if on_progress is not None:
+        on_progress(ProgressUpdate("Conversion en MKV", None, 1.0, None))
+    return destination
+
+
+def _run_mkvmerge_with_progress(
+    command: list[str],
+    callback: Callable[[ProgressUpdate], None],
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    if process.stdout is None:
+        process.kill()
+        raise MovieError("mkvmerge n'a pas ouvert son flux de progression.")
+
+    lines: list[str] = []
+    try:
+        for line in process.stdout:
+            lines.append(line)
+            fraction = _mkvmerge_progress_fraction(line)
+            if fraction is not None:
+                callback(ProgressUpdate("Conversion en MKV", None, fraction, None))
+    except BaseException:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        raise
+    finally:
+        process.stdout.close()
+    return_code = process.wait()
+    output = "".join(lines)
+    return subprocess.CompletedProcess(command, return_code, output, output)
+
+
+def _mkvmerge_progress_fraction(line: str) -> float | None:
+    prefix = "#GUI#progress "
+    value = line.strip()
+    if not value.startswith(prefix) or not value.endswith("%"):
+        return None
+    try:
+        return max(0.0, min(1.0, int(value[len(prefix) : -1]) / 100))
+    except ValueError:
+        return None

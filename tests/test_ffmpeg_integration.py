@@ -121,6 +121,91 @@ class FfmpegIntegrationTests(TestCase):
                 _video_frame_hashes(output),
             )
 
+    def test_real_mp4_preserves_multiple_audio_and_text_subtitles(self) -> None:
+        assert FFMPEG is not None
+        assert FFPROBE is not None
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            subtitles = directory / "subtitle.srt"
+            subtitles.write_text(
+                "1\n00:00:00,000 --> 00:00:00,800\nBonjour\n",
+                encoding="utf-8",
+            )
+            source = directory / "source.mkv"
+            output = directory / "output.mp4"
+            generated = subprocess.run(
+                [
+                    FFMPEG,
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=size=64x64:rate=10:duration=1",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:duration=1",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=880:duration=1",
+                    "-i",
+                    str(subtitles),
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-map",
+                    "2:a:0",
+                    "-map",
+                    "3:s:0",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "eac3",
+                    "-c:s",
+                    "srt",
+                    "-metadata:s:a:0",
+                    "language=fra",
+                    "-metadata:s:a:1",
+                    "language=eng",
+                    "-metadata:s:s:0",
+                    "language=fra",
+                    str(source),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            probe = MediaProbe(FFPROBE)
+            source_media = probe.probe(source)
+
+            MediaConverter(FFMPEG).convert(
+                source,
+                output,
+                output_format=OutputFormat.MP4,
+                quality=OutputQuality.BALANCED,
+                source_media=source_media,
+            )
+
+            output_media = probe.probe(output)
+            self.assertEqual(
+                [
+                    (stream.kind, stream.language, stream.codec)
+                    for stream in output_media.streams
+                ],
+                [
+                    ("video", None, "h264"),
+                    ("audio", "fra", "aac"),
+                    ("audio", "eng", "aac"),
+                    ("subtitle", "fra", "mov_text"),
+                ],
+            )
+
     def test_real_rip_verification_accepts_makemkv_removing_empty_subtitle(
         self,
     ) -> None:

@@ -188,16 +188,20 @@ Une vidéo utilisant un autre codec est réencodée en H.264 selon le profil cho
 ### Monter ou couper une vidéo sur Mac
 
 Pour iMovie comme pour DaVinci Resolve, choisis **MP4**. Si la source contient
-plusieurs pistes audio, Movie les présente clairement et demande laquelle doit
-être conservée : le résultat contient une seule piste audio, ce qui évite les
-interprétations ambiguës des logiciels de montage. Une vidéo H.264 reste copiée
-sans perte ; seule une piste E-AC-3, AC-3 ou autrement incompatible est convertie
-en AAC.
+plusieurs pistes audio, Movie les conserve toutes comme pistes AAC indépendantes :
+elles ne sont jamais fusionnées. DaVinci permet ensuite d'activer, couper ou
+supprimer les langues inutiles dans la timeline. Une vidéo H.264 reste copiée
+sans perte ; seuls les flux audio incompatibles sont convertis en AAC.
 
-Conserve le MKV original comme archive complète si tu veux garder toutes les
-langues et tous les sous-titres. Effectue le montage, exporte le fichier final,
-puis lance `uv run movie tag` sur ce résultat : un logiciel de montage peut
-supprimer les métadonnées et la jaquette lors de son propre export.
+Pour Infuse ou pour une archive complète, choisis **MKV**, qui reste la sortie
+proposée par défaut. Movie y conserve la vidéo, toutes les pistes audio et tous
+les sous-titres sans réencodage. Les sources TS, MTS et M2TS sont remuxées avec
+MKVToolNix, plus tolérant lorsque l'enregistrement contient des paquets dont les
+horodatages sont incomplets.
+
+Après le montage, exporte le fichier final puis lance `uv run movie tag` sur ce
+résultat : un logiciel de montage peut supprimer les métadonnées et la jaquette
+lors de son propre export.
 
 Le profil équilibré en MP4 reste le meilleur choix par défaut. Un format ancien
 ne rend pas une vidéo meilleure ; AVI, MPG, ASF, WMV et FLV existent uniquement
@@ -209,15 +213,14 @@ ne peuvent pas tous être conservés.
 
 Une ISO destinée au MKV est extraite puis publiée directement, sans remuxage
 inutile. Pour toute autre sortie, elle est d'abord extraite en MKV temporaire,
-vérifiée, puis convertie. Le MKV conserve toutes les pistes audio. Pour les autres
-sorties, lorsqu'il existe plusieurs pistes, l'interface demande toujours laquelle
-intégrer au fichier final ; la piste choisie est convertie dans le codec prévu par
-le format. Ce choix rend notamment les MP4 et M4V fiables dans les logiciels de
-montage, sans mélange ni piste audio imprévisible. Les pistes de
-sous-titres ne sont jamais abandonnées silencieusement : leur exclusion des
-sorties réencodées est annoncée, de même que la perte éventuelle de chapitres ou
-d'étiquettes de langue dans les anciens conteneurs. Choisis MKV pour tout
-conserver sans compromis.
+vérifiée, puis convertie. Toutes les pistes audio sont conservées par défaut et
+encodées séparément dans le codec prévu par la sortie. Les sous-titres textuels
+compatibles sont également conservés : Movie les transforme en `mov_text` dans
+MP4/M4V/MOV et en WebVTT dans WebM. Les sous-titres image DVB ou PGS ne peuvent
+pas être convertis automatiquement en texte ; ils restent tous dans le MKV, et
+leur omission d'un conteneur incompatible est annoncée explicitement. La perte
+éventuelle de chapitres ou d'étiquettes de langue dans les anciens conteneurs est
+également signalée. Choisis MKV pour tout conserver sans compromis.
 
 Le fichier converti est créé dans le dossier configuré ou, par défaut, à côté
 de la source. Une destination existante n'est jamais remplacée.
@@ -394,9 +397,9 @@ uv run ruff check src tests
 uv run pyright
 ```
 
-État vérifié le 29 septembre 2026 pour la version 0.3.0 :
+État vérifié le 30 septembre 2026 pour la version 0.3.0 :
 
-- 199 tests et 85 sous-tests réussissent ;
+- 205 tests et 85 sous-tests réussissent ;
 - la couverture automatisée atteint 86 % des lignes ;
 - Ruff ne relève aucune erreur ;
 - Pyright ne relève aucune erreur ni aucun avertissement ;
@@ -404,6 +407,10 @@ uv run pyright
 - la distribution source et la wheel se construisent correctement ;
 - de vrais appels FFmpeg/ffprobe créent et relisent MKV, MP4, M4V, MOV, WebM,
   AVI, MPG, ASF, WMV, FLV, TS et MTS, puis réutilisent chacun comme source d'un MP4 ;
+- un enregistrement M2TS réel de 8,4 Go contenant des paquets H.264 sans
+  horodatage a été remuxé intégralement en MKV : la vidéo, les 3 pistes audio et
+  les 2 sous-titres DVB ont été conservés, avec seulement 1,24 s d'écart sur une
+  durée de 2 h 10 min ;
 - les métadonnées manuelles/TMDB et le remplacement des jaquettes sont aussi
   contrôlés avec de vrais médias ;
 - la fiche TMDB fournie pour *Star Wars : L'Ascension de Skywalker* et sa

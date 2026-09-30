@@ -28,6 +28,15 @@ class EncodingFamily(StrEnum):
     FLV1 = "flv1"
 
 
+class SubtitleMode(StrEnum):
+    """Façon fiable d'intégrer les sous-titres dans un conteneur."""
+
+    NONE = "none"
+    COPY = "copy"
+    MOV_TEXT = "mov_text"
+    WEBVTT = "webvtt"
+
+
 @dataclass(frozen=True, slots=True)
 class OutputFormatSpec:
     """Règles de création et de contrôle d'un conteneur de sortie."""
@@ -40,6 +49,7 @@ class OutputFormatSpec:
     preserves_chapters: bool
     preserves_audio_languages: bool
     supports_tagging: bool = False
+    subtitle_mode: SubtitleMode = SubtitleMode.NONE
 
     @property
     def copies_source(self) -> bool:
@@ -77,6 +87,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         True,
         True,
         supports_tagging=True,
+        subtitle_mode=SubtitleMode.COPY,
     ),
     OutputFormat.MP4: OutputFormatSpec(
         "MP4",
@@ -87,6 +98,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         True,
         True,
         supports_tagging=True,
+        subtitle_mode=SubtitleMode.MOV_TEXT,
     ),
     OutputFormat.M4V: OutputFormatSpec(
         "M4V",
@@ -97,6 +109,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         True,
         True,
         supports_tagging=True,
+        subtitle_mode=SubtitleMode.MOV_TEXT,
     ),
     OutputFormat.MOV: OutputFormatSpec(
         "MOV",
@@ -106,6 +119,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         "aac",
         True,
         True,
+        subtitle_mode=SubtitleMode.MOV_TEXT,
     ),
     OutputFormat.WEBM: OutputFormatSpec(
         "WebM",
@@ -115,6 +129,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         "opus",
         True,
         True,
+        subtitle_mode=SubtitleMode.WEBVTT,
     ),
     OutputFormat.AVI: OutputFormatSpec(
         "AVI",
@@ -169,6 +184,7 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         "aac",
         False,
         True,
+        subtitle_mode=SubtitleMode.COPY,
     ),
     OutputFormat.MTS: OutputFormatSpec(
         "MTS",
@@ -178,14 +194,49 @@ OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
         "aac",
         False,
         True,
+        subtitle_mode=SubtitleMode.COPY,
     ),
 }
+_TEXT_SUBTITLE_CODECS = frozenset(
+    {
+        "ass",
+        "mov_text",
+        "ssa",
+        "srt",
+        "subrip",
+        "text",
+        "webvtt",
+    }
+)
+_TRANSPORT_SUBTITLE_CODECS = frozenset({"dvb_subtitle", "hdmv_pgs_subtitle"})
 
 
 def output_spec(output_format: OutputFormat) -> OutputFormatSpec:
     """Retourne la règle unique associée à une sortie prise en charge."""
 
     return OUTPUT_FORMAT_SPECS[output_format]
+
+
+def subtitle_codec_supported(
+    output_format: OutputFormat,
+    source_codec: str | None,
+) -> bool:
+    """Indique si une piste peut être conservée sans OCR ni résultat trompeur."""
+
+    if output_format is OutputFormat.MKV:
+        return True
+    mode = output_spec(output_format).subtitle_mode
+    if mode in {SubtitleMode.MOV_TEXT, SubtitleMode.WEBVTT}:
+        return source_codec in _TEXT_SUBTITLE_CODECS
+    if mode is SubtitleMode.COPY:
+        return source_codec in _TRANSPORT_SUBTITLE_CODECS
+    return False
+
+
+def output_subtitle_codec(output_format: OutputFormat, source_codec: str) -> str:
+    """Retourne le codec attendu après conservation d'un sous-titre compatible."""
+    mode = output_spec(output_format).subtitle_mode
+    return source_codec if mode is SubtitleMode.COPY else mode.value
 
 
 def output_format_choices() -> dict[str, str]:
