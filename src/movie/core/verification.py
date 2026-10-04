@@ -250,7 +250,7 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
             f"Le MKV a perdu des pistes ({details}) ; rien n'a été publié."
         )
     expected_codecs = Counter(
-        (stream.kind, stream.codec)
+        (stream.kind, _expected_mkv_codec(source, stream))
         for stream in source.streams
         if stream.kind != "attachment" and stream.codec
     )
@@ -272,6 +272,14 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
         if stream.kind != "attachment" and stream.language
     )
     warnings: list[str] = []
+    if any(
+        stream.kind == "subtitle" and stream.codec == "dvb_teletext"
+        for stream in source.streams
+    ):
+        warnings.append(
+            "Le sous-titre télétexte a été converti en SubRip par mkvmerge afin "
+            "d'être stocké dans le MKV ; son contenu reste présent."
+        )
     if expected_languages - actual_languages:
         warnings.append(
             "Le remuxeur MKV a normalisé une ou plusieurs étiquettes de langue ; "
@@ -281,6 +289,22 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
         raise MovieError("Le MKV a perdu un ou plusieurs chapitres.")
     _validate_duration(source, output, "MKV")
     return tuple(warnings)
+
+
+def _expected_mkv_codec(source: ProbedMedia, stream: MediaStream) -> str:
+    """Tient compte des normalisations documentées du remuxeur Matroska."""
+
+    assert stream.codec is not None
+    if (
+        source.path.suffix.casefold() in {".m2ts", ".mts", ".ts"}
+        and stream.kind == "subtitle"
+        and stream.codec == "dvb_teletext"
+    ):
+        # Matroska n'a pas de représentation native du télétexte DVB. mkvmerge
+        # extrait donc les pages de sous-titres sous forme de texte SubRip sans
+        # supprimer la piste (mkvmerge -J l'annonce lui-même comme SubRip/SRT).
+        return "subrip"
+    return stream.codec
 
 
 def _validate_video_output(

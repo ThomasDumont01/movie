@@ -25,7 +25,7 @@ from movie.core.rip import RipService
 from movie.core.tag import TagService, build_tag_plan
 from movie.core.verification import validate_conversion
 from movie.enrichment import MediaTagger
-from movie.formats import output_spec
+from movie.formats import TRANSCODE_QUALITIES, output_spec
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -493,48 +493,68 @@ class FfmpegIntegrationTests(TestCase):
             source_media = MediaProbe(FFPROBE).probe(source)
             outputs: list[tuple[Path, OutputFormat]] = []
             for output_format in OutputFormat:
-                with self.subTest(output=output_format.value):
-                    spec = output_spec(output_format)
-                    output = directory / f"video.{output_format.value}"
-                    quality = (
-                        OutputQuality.SOURCE
-                        if spec.copies_source
-                        else OutputQuality.BALANCED
-                    )
-                    converter.convert(
-                        source,
-                        output,
-                        output_format=output_format,
-                        quality=quality,
-                    )
-                    media = MediaProbe(FFPROBE).probe(output)
-                    validate_conversion(
-                        ConvertPlan(
+                spec = output_spec(output_format)
+                qualities = (
+                    (OutputQuality.SOURCE,)
+                    if spec.copies_source
+                    else TRANSCODE_QUALITIES
+                )
+                for quality in qualities:
+                    with self.subTest(
+                        output=output_format.value,
+                        quality=quality.value,
+                    ):
+                        output = directory / (
+                            f"video-{quality.value}.{output_format.value}"
+                        )
+                        converter.convert(
                             source,
                             output,
-                            output_format,
-                            quality,
+                            output_format=output_format,
+                            quality=quality,
                             source_media=source_media,
-                        ),
-                        source_media,
-                        media,
-                    )
-                    if spec.copies_source:
-                        self.assertIn(
-                            ("audio", "pcm_s16le"),
-                            {(stream.kind, stream.codec) for stream in media.streams},
                         )
-                    else:
-                        self.assertIn(
-                            ("video", spec.video_codec),
-                            {(stream.kind, stream.codec) for stream in media.streams},
+                        media = MediaProbe(FFPROBE).probe(output)
+                        validate_conversion(
+                            ConvertPlan(
+                                source,
+                                output,
+                                output_format,
+                                quality,
+                                source_media=source_media,
+                            ),
+                            source_media,
+                            media,
                         )
-                        self.assertIn(
-                            ("audio", spec.audio_codec),
-                            {(stream.kind, stream.codec) for stream in media.streams},
-                        )
-                    self.assertGreater(output.stat().st_size, 0)
-                    outputs.append((output, output_format))
+                        if spec.copies_source:
+                            self.assertIn(
+                                ("audio", "pcm_s16le"),
+                                {
+                                    (stream.kind, stream.codec)
+                                    for stream in media.streams
+                                },
+                            )
+                        else:
+                            self.assertIn(
+                                ("video", spec.video_codec),
+                                {
+                                    (stream.kind, stream.codec)
+                                    for stream in media.streams
+                                },
+                            )
+                            self.assertIn(
+                                ("audio", spec.audio_codec),
+                                {
+                                    (stream.kind, stream.codec)
+                                    for stream in media.streams
+                                },
+                            )
+                        self.assertGreater(output.stat().st_size, 0)
+                        if quality in {
+                            OutputQuality.SOURCE,
+                            OutputQuality.BALANCED,
+                        }:
+                            outputs.append((output, output_format))
 
             for index, (input_path, input_format) in enumerate(outputs):
                 with self.subTest(input=input_format.value):

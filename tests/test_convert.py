@@ -186,6 +186,41 @@ class ConvertPlanTests(TestCase):
 
             self.assertIn("normalisé", warnings[0])
 
+    def test_mkv_accepts_teletext_converted_to_subrip_by_mkvmerge(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source_path = directory / "source.m2ts"
+            output_path = directory / "output.mkv"
+            source_path.write_bytes(b"source")
+            source = ProbedMedia(
+                source_path,
+                120,
+                ("video", "audio", "subtitle"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "aac"),
+                    MediaStream("subtitle", "fra", "dvb_teletext"),
+                ),
+            )
+            output = ProbedMedia(
+                output_path,
+                120,
+                ("video", "audio", "subtitle"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fre", "aac"),
+                    MediaStream("subtitle", "fre", "subrip"),
+                ),
+            )
+            plan = build_convert_plan(source_path, "mkv", source_media=source)
+
+            warnings = validate_conversion(plan, source, output)
+
+            self.assertTrue(any("télétexte" in warning for warning in warnings))
+            self.assertTrue(any("langue" in warning for warning in warnings))
+
     def test_mp4_validation_accepts_all_audio_and_text_subtitles(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
