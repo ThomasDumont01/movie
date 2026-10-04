@@ -344,6 +344,8 @@ class CommandFlowTests(TestCase):
     ) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)
+            configured_destination = directory / "configured"
+            configured_destination.mkdir()
             source = directory / "source.mkv"
             source.write_bytes(b"source")
             destination = directory / "source.mp4"
@@ -373,7 +375,7 @@ class CommandFlowTests(TestCase):
                 ),
             )
             load.return_value = MovieConfig(
-                output_directory=directory,
+                output_directory=configured_destination,
                 auto_run=True,
                 alert_sound=False,
                 convert_format=OutputFormat.MP4,
@@ -398,6 +400,7 @@ class CommandFlowTests(TestCase):
             service.execute.assert_called_once()
             plan = service.execute.call_args.args[0]
             self.assertIs(plan.source_media, source_media)
+            self.assertEqual(plan.output, directory.resolve() / "source.mp4")
 
     @patch("movie.__main__.execute_folder_conversion")
     @patch("movie.__main__.discover_video_files")
@@ -412,6 +415,8 @@ class CommandFlowTests(TestCase):
     ) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
+            configured_destination = root / "configured"
+            configured_destination.mkdir()
             source = root / "vacances"
             source.mkdir()
             video = source / "camera.data"
@@ -426,7 +431,7 @@ class CommandFlowTests(TestCase):
             discover.return_value = (discovered,)
             execute.return_value = ()
             load.return_value = MovieConfig(
-                output_directory=root,
+                output_directory=configured_destination,
                 auto_run=True,
                 alert_sound=False,
                 convert_format=OutputFormat.MP4,

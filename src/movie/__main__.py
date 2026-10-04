@@ -535,7 +535,7 @@ def _convert() -> int:
         iso_title=iso_title,
     )
     output_directory = _resolve_output_directory(
-        configured=config.output_directory,
+        configured=None,
         fallback=source.parent,
         required_bytes=required_bytes,
         alert=config.alert_sound,
@@ -605,7 +605,7 @@ def _convert_folder(
     _print_step(2, 3, "Choix de la sortie")
     selected_format, selected_quality = _resolve_conversion_settings(config)
     output_directory = _resolve_output_directory(
-        configured=config.output_directory,
+        configured=None,
         fallback=source.parent,
         required_bytes=folder_conversion_required_bytes(source),
         alert=config.alert_sound,

@@ -427,6 +427,36 @@ class MediaConverterTests(TestCase):
             self.assertIn("--gui-mode", command)
             self.assertEqual(command[-2:], [str(destination), str(source)])
 
+    @patch("movie.ffmpeg.subprocess.run")
+    def test_mkv_generates_missing_input_timestamps_without_reencoding(
+        self,
+        run: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "old-camera.mpg"
+            destination = directory / "film.mkv"
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                destination.write_bytes(b"mkv")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaConverter("ffmpeg-test").convert(
+                source,
+                destination,
+                output_format=OutputFormat.MKV,
+                quality=OutputQuality.SOURCE,
+            )
+
+            command = run.call_args.args[0]
+            input_index = command.index("-i")
+            self.assertEqual(
+                command[input_index - 2 : input_index],
+                ["-fflags", "+genpts"],
+            )
+            self.assertEqual(command[command.index("-c") + 1], "copy")
+
     def test_mkvmerge_progress_is_converted_to_fraction(self) -> None:
         self.assertEqual(_mkvmerge_progress_fraction("#GUI#progress 57%"), 0.57)
         self.assertIsNone(_mkvmerge_progress_fraction("Multiplexing took 1 second"))

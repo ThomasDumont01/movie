@@ -126,13 +126,20 @@ class MediaConverter:
             progress_label=label,
         )
 
-    def _base_command(self, source: Path) -> list[str]:
+    def _base_command(
+        self,
+        source: Path,
+        *,
+        generate_missing_timestamps: bool = False,
+    ) -> list[str]:
         command = [
             self.executable or find_ffmpeg(),
             "-v",
             "error",
             "-nostdin",
         ]
+        if generate_missing_timestamps:
+            command.extend(("-fflags", "+genpts"))
         hint = input_format_hint(source.suffix)
         if hint is not None:
             command.extend(("-f", hint))
@@ -147,7 +154,7 @@ class MediaConverter:
     ) -> list[str]:
         if quality is not OutputQuality.SOURCE:
             raise MovieError("Le MKV utilise obligatoirement le profil source.")
-        command = self._base_command(source)
+        command = self._base_command(source, generate_missing_timestamps=True)
         command.extend(
             ("-map", "0", "-map_metadata", "0", "-map_chapters", "0", "-c", "copy")
         )
