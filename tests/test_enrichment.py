@@ -457,6 +457,37 @@ class MediaConverterTests(TestCase):
             )
             self.assertEqual(command[command.index("-c") + 1], "copy")
 
+    @patch("movie.ffmpeg.subprocess.run")
+    def test_mkv_omits_container_specific_data_streams(
+        self,
+        run: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source = directory / "camera.m4v"
+            destination = directory / "camera.mkv"
+
+            def complete(command: list[str], **_: object) -> CompletedProcess[str]:
+                destination.write_bytes(b"mkv")
+                return CompletedProcess(command, 0, "", "")
+
+            run.side_effect = complete
+            MediaConverter("ffmpeg-test").convert(
+                source,
+                destination,
+                output_format=OutputFormat.MKV,
+                quality=OutputQuality.SOURCE,
+            )
+
+            command = run.call_args.args[0]
+            mapped_streams = [
+                command[index + 1]
+                for index, argument in enumerate(command[:-1])
+                if argument == "-map"
+            ]
+            self.assertEqual(mapped_streams, ["0:v?", "0:a?", "0:s?", "0:t?"])
+            self.assertNotIn("0:d?", mapped_streams)
+
     def test_mkvmerge_progress_is_converted_to_fraction(self) -> None:
         self.assertEqual(_mkvmerge_progress_fraction("#GUI#progress 57%"), 0.57)
         self.assertIsNone(_mkvmerge_progress_fraction("Multiplexing took 1 second"))

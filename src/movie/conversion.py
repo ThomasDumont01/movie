@@ -155,9 +155,14 @@ class MediaConverter:
         if quality is not OutputQuality.SOURCE:
             raise MovieError("Le MKV utilise obligatoirement le profil source.")
         command = self._base_command(source, generate_missing_timestamps=True)
-        command.extend(
-            ("-map", "0", "-map_metadata", "0", "-map_chapters", "0", "-c", "copy")
-        )
+        # Some MP4/M4V files contain MPEG-4 Systems/data streams (often tagged
+        # ``mp4s``). Matroska cannot represent those streams, and selecting the
+        # whole input with ``-map 0`` makes FFmpeg abort before writing its
+        # header. Preserve every media stream Matroska can carry while leaving
+        # container-specific data streams behind.
+        for stream_type in ("v", "a", "s", "t"):
+            command.extend(("-map", f"0:{stream_type}?"))
+        command.extend(("-map_metadata", "0", "-map_chapters", "0", "-c", "copy"))
         return command
 
     def _video_command(
