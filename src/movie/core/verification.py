@@ -239,7 +239,10 @@ def validate_metadata(metadata: MovieMetadata, media: ProbedMedia) -> None:
 
 
 def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
-    source_streams = Counter(stream.kind for stream in source.streams)
+    supported_kinds = frozenset({"video", "audio", "subtitle", "attachment"})
+    source_streams = Counter(
+        stream.kind for stream in source.streams if stream.kind in supported_kinds
+    )
     output_streams = Counter(stream.kind for stream in output.streams)
     missing = source_streams - output_streams
     if missing:
@@ -252,7 +255,9 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
     expected_codecs = Counter(
         (stream.kind, _expected_mkv_codec(source, stream))
         for stream in source.streams
-        if stream.kind != "attachment" and stream.codec
+        if stream.kind in supported_kinds
+        and stream.kind != "attachment"
+        and stream.codec
     )
     actual_codecs = Counter(
         (stream.kind, stream.codec)
@@ -264,7 +269,9 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
     expected_languages = Counter(
         (stream.kind, stream.language)
         for stream in source.streams
-        if stream.kind != "attachment" and stream.language
+        if stream.kind in supported_kinds
+        and stream.kind != "attachment"
+        and stream.language
     )
     actual_languages = Counter(
         (stream.kind, stream.language)
@@ -272,6 +279,15 @@ def _validate_mkv(source: ProbedMedia, output: ProbedMedia) -> tuple[str, ...]:
         if stream.kind != "attachment" and stream.language
     )
     warnings: list[str] = []
+    omitted_data_streams = sum(
+        stream.kind == "data" for stream in source.streams
+    )
+    if omitted_data_streams:
+        warnings.append(
+            f"{omitted_data_streams} piste(s) technique(s) de données propre(s) au "
+            "conteneur source ont été ignorées ; les pistes vidéo, audio et "
+            "sous-titres restent intactes."
+        )
     if any(
         stream.kind == "subtitle" and stream.codec == "dvb_teletext"
         for stream in source.streams

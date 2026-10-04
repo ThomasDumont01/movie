@@ -434,7 +434,7 @@ def _rip() -> int:
     print(f"  Titre       : {_format_title(plan.title)}")
     if plan.title.size_bytes:
         print(f"  Taille      : {_format_file_size(plan.title.size_bytes)}")
-    print("  Sortie      : MKV · qualité source · toutes les pistes")
+    print("  Sortie      : MKV · qualité source · toutes les pistes média")
     print(f"  Destination : {plan.output}")
     if not config.auto_run and not _prompt_yes_no("Lancer cette numérisation ?"):
         print("Numérisation annulée. Aucun fichier n'a été écrit.")
@@ -978,7 +978,7 @@ def _output_description(
 ) -> str:
     spec = output_spec(output_format)
     if spec.copies_source:
-        return "MKV · qualité source · toutes les pistes"
+        return "MKV · qualité source · toutes les pistes média"
     quality_labels = {
         OutputQuality.HIGH: "haute qualité",
         OutputQuality.BALANCED: "équilibré",

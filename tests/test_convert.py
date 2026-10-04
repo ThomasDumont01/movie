@@ -228,6 +228,40 @@ class ConvertPlanTests(TestCase):
             self.assertTrue(any("télétexte" in warning for warning in warnings))
             self.assertTrue(any("langue" in warning for warning in warnings))
 
+    def test_mkv_ignores_mp4_container_data_streams(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            source_path = directory / "source.mp4"
+            source_path.write_bytes(b"source")
+            source = ProbedMedia(
+                source_path,
+                120,
+                ("video", "audio", "data", "data"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "aac"),
+                    MediaStream("data", codec="bin_data"),
+                    MediaStream("data", codec="bin_data"),
+                ),
+            )
+            output = ProbedMedia(
+                directory / "output.mkv",
+                120,
+                ("video", "audio"),
+                0,
+                streams=(
+                    MediaStream("video", codec="h264"),
+                    MediaStream("audio", "fra", "aac"),
+                ),
+            )
+            plan = build_convert_plan(source_path, "mkv", source_media=source)
+
+            warnings = validate_conversion(plan, source, output)
+
+            self.assertEqual(len(warnings), 1)
+            self.assertIn("2 piste(s) technique(s)", warnings[0])
+
     def test_mp4_validation_accepts_all_audio_and_text_subtitles(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)

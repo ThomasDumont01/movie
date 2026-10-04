@@ -80,7 +80,7 @@ TRANSCODE_QUALITIES = (
 OUTPUT_FORMAT_SPECS: dict[OutputFormat, OutputFormatSpec] = {
     OutputFormat.MKV: OutputFormatSpec(
         "MKV",
-        "archive fidèle : toutes les pistes, sans réencodage",
+        "archive fidèle : toutes les pistes média, sans réencodage",
         EncodingFamily.COPY,
         None,
         None,
