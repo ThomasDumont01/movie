@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -43,6 +44,7 @@ from movie.formats import (
 )
 
 _MAX_FILENAME_BYTES = 240
+_BATCH_SUFFIX = "-converted"
 
 
 class _MakeMkvBackend(Protocol):
@@ -347,6 +349,204 @@ class ConversionService:
             media=replace(output_media, path=plan.output),
             warnings=tuple(dict.fromkeys(warnings)),
         )
+
+
+def discover_video_files(
+    source_directory: Path | str,
+    probe: _ProbeBackend,
+) -> tuple[ProbedMedia, ...]:
+    """Détecte par le contenu toutes les vidéos d'une arborescence."""
+
+    root = Path(source_directory).expanduser().resolve()
+    if not root.is_dir():
+        raise MovieError(f"Le dossier source est introuvable : {root}")
+    videos: list[ProbedMedia] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        try:
+            media = probe.probe(path)
+        except MovieError:
+            continue
+        if any(stream.kind == "video" and not stream.is_artwork for stream in media.streams):
+            videos.append(media)
+    return tuple(videos)
+
+
+def folder_output_path(source: Path | str, output_directory: Path | str) -> Path:
+    """Calcule le nom stable de la copie convertie d'un dossier."""
+
+    root = Path(source).expanduser().resolve()
+    parent = Path(output_directory).expanduser().resolve()
+    return parent / f"{root.name}{_BATCH_SUFFIX}"
+
+
+def execute_folder_conversion(
+    source_directory: Path | str,
+    destination: Path | str,
+    videos: tuple[ProbedMedia, ...],
+    *,
+    output_format: OutputFormat,
+    output_quality: OutputQuality,
+    service: ConversionService,
+    on_progress: Callable[[ProgressUpdate], None] | None = None,
+) -> tuple[ConvertResult, ...]:
+    """Copie une arborescence et y remplace chaque vidéo par sa conversion."""
+
+    source = Path(source_directory).expanduser().resolve()
+    output = Path(destination).expanduser().resolve()
+    if not source.is_dir():
+        raise MovieError(f"Le dossier source est introuvable : {source}")
+    if output == source or source in output.parents:
+        raise MovieError("La copie convertie doit être créée hors du dossier source.")
+    if is_occupied(output):
+        raise OutputExistsError(
+            f"Le dossier existe déjà et ne sera pas remplacé : {output}"
+        )
+
+    media_by_path = {media.path.resolve(): media for media in videos}
+    targets = _folder_targets(source, media_by_path, output_format)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{output.name}.movie-", dir=output.parent)
+    )
+    results: list[ConvertResult] = []
+    try:
+        for directory in sorted(
+            (
+                path
+                for path in source.rglob("*")
+                if path.is_dir() and not path.is_symlink()
+            ),
+            key=lambda path: len(path.parts),
+        ):
+            (staging / directory.relative_to(source)).mkdir(parents=True, exist_ok=True)
+
+        files = sorted(
+            path
+            for path in source.rglob("*")
+            if path.is_file() or path.is_symlink()
+        )
+        converted_index = 0
+        for path in files:
+            relative = path.relative_to(source)
+            media = media_by_path.get(path.resolve()) if not path.is_symlink() else None
+            if media is None:
+                _copy_folder_entry(path, staging / relative)
+                continue
+
+            target = staging / targets[path.resolve()]
+            plan = build_convert_plan(
+                path,
+                output_format,
+                output_quality=output_quality,
+                output=target,
+                source_media=media,
+            )
+
+            def report(
+                update: ProgressUpdate,
+                *,
+                index: int = converted_index,
+                source_name: str = path.name,
+            ) -> None:
+                if on_progress is None:
+                    return
+                fraction = update.total_fraction
+                bounded = max(0.0, min(1.0, fraction or 0.0))
+                count = max(1, len(videos))
+                on_progress(
+                    ProgressUpdate(
+                        current_label=(
+                            f"{source_name} · {update.current_label or 'Conversion'}"
+                        ),
+                        total_label=f"{index + 1}/{count} vidéos",
+                        current_fraction=update.current_fraction,
+                        total_fraction=(index + bounded) / count,
+                    )
+                )
+
+            results.append(service.execute(plan, on_progress=report))
+            converted_index += 1
+
+        for directory in sorted(
+            (
+                path
+                for path in source.rglob("*")
+                if path.is_dir() and not path.is_symlink()
+            ),
+            key=lambda path: len(path.parts),
+            reverse=True,
+        ):
+            shutil.copystat(directory, staging / directory.relative_to(source))
+        shutil.copystat(source, staging)
+        if is_occupied(output):
+            raise OutputExistsError(
+                f"Le dossier existe déjà et ne sera pas remplacé : {output}"
+            )
+        os.rename(staging, output)
+    except (MovieError, OSError) as error:
+        shutil.rmtree(staging, ignore_errors=True)
+        if isinstance(error, MovieError):
+            raise
+        raise MovieError("Impossible de créer la copie convertie du dossier.") from error
+
+    published_results: list[ConvertResult] = []
+    for result in results:
+        published_path = output / result.output.relative_to(staging)
+        published_results.append(
+            replace(
+                result,
+                output=published_path,
+                media=replace(result.media, path=published_path),
+            )
+        )
+    return tuple(published_results)
+
+
+def _folder_targets(
+    source: Path,
+    videos: dict[Path, ProbedMedia],
+    output_format: OutputFormat,
+) -> dict[Path, Path]:
+    targets: dict[Path, Path] = {}
+    occupied: dict[Path, Path] = {}
+    directories = {
+        path.relative_to(source)
+        for path in source.rglob("*")
+        if path.is_dir() and not path.is_symlink()
+    }
+    for path in sorted(
+        item
+        for item in source.rglob("*")
+        if item.is_file() or item.is_symlink()
+    ):
+        resolved = path.resolve()
+        relative = path.relative_to(source)
+        target = (
+            relative.with_suffix(f".{output_format.value}")
+            if resolved in videos and not path.is_symlink()
+            else relative
+        )
+        previous = occupied.get(target)
+        if previous is not None or target in directories:
+            other = previous or source / target
+            raise MovieError(
+                "Deux éléments produiraient le même chemin dans la copie : "
+                f"{other} et {path}."
+            )
+        occupied[target] = path
+        if resolved in videos and not path.is_symlink():
+            targets[resolved] = target
+    return targets
+
+
+def _copy_folder_entry(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_symlink():
+        destination.symlink_to(os.readlink(source))
+    else:
+        shutil.copy2(source, destination)
 
 
 def _destination_path(

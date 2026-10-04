@@ -9,7 +9,14 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from movie.core.convert import ConversionService, _ensure_free_space, build_convert_plan
+from movie.core.convert import (
+    ConversionService,
+    _ensure_free_space,
+    build_convert_plan,
+    discover_video_files,
+    execute_folder_conversion,
+    folder_output_path,
+)
 from movie.core.models import (
     DiscScan,
     DiscTitle,
@@ -263,6 +270,103 @@ class ConvertPlanTests(TestCase):
 
 
 class ConversionExecutionTests(TestCase):
+    def test_folder_conversion_copies_tree_and_converts_every_video(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "vacances"
+            nested = source / "jour-1"
+            nested.mkdir(parents=True)
+            first = source / "camera-file.bin"
+            second = nested / "clip.avi"
+            note = nested / "notes.txt"
+            first.write_bytes(b"video-one")
+            second.write_bytes(b"video-two")
+            note.write_text("souvenir", encoding="utf-8")
+            media = tuple(_FakeProbe().probe(path) for path in (first, second))
+            destination = folder_output_path(source, root)
+
+            results = execute_folder_conversion(
+                source,
+                destination,
+                media,
+                output_format=OutputFormat.MP4,
+                output_quality=OutputQuality.BALANCED,
+                service=ConversionService(
+                    _FakeMakeMkv(),
+                    _FakeProbe(),
+                    _FakeConverter(),
+                ),
+            )
+
+            self.assertFalse((destination / "camera-file.bin").exists())
+            self.assertEqual((destination / "camera-file.mp4").read_bytes(), b"converted")
+            self.assertEqual(
+                (destination / "jour-1" / "clip.mp4").read_bytes(),
+                b"converted",
+            )
+            self.assertEqual(
+                (destination / "jour-1" / "notes.txt").read_text(encoding="utf-8"),
+                "souvenir",
+            )
+            self.assertEqual(len(results), 2)
+            self.assertTrue(all(result.output.is_relative_to(destination) for result in results))
+
+    def test_folder_conversion_refuses_output_name_collisions(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "sources"
+            source.mkdir()
+            first = source / "film.mov"
+            second = source / "film.avi"
+            first.write_bytes(b"one")
+            second.write_bytes(b"two")
+            media = tuple(_FakeProbe().probe(path) for path in (first, second))
+
+            with self.assertRaisesRegex(MovieError, "même chemin"):
+                execute_folder_conversion(
+                    source,
+                    root / "sources-converted",
+                    media,
+                    output_format=OutputFormat.MP4,
+                    output_quality=OutputQuality.BALANCED,
+                    service=ConversionService(
+                        _FakeMakeMkv(),
+                        _FakeProbe(),
+                        _FakeConverter(),
+                    ),
+                )
+
+            self.assertFalse((root / "sources-converted").exists())
+
+    def test_folder_discovery_uses_content_instead_of_extensions(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            video = root / "recording.unknown"
+            document = root / "document.mp4"
+            video.write_bytes(b"video")
+            document.write_bytes(b"text")
+            probe = MagicMock()
+            probe.probe.side_effect = (
+                ProbedMedia(
+                    document,
+                    None,
+                    (),
+                    0,
+                    streams=(),
+                ),
+                ProbedMedia(
+                    video,
+                    1,
+                    ("video",),
+                    0,
+                    streams=(MediaStream("video", codec="h264"),),
+                ),
+            )
+
+            discovered = discover_video_files(root, probe)
+
+            self.assertEqual(tuple(media.path for media in discovered), (video,))
+
     def test_an_existing_source_analysis_is_reused(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             directory = Path(temporary_directory)

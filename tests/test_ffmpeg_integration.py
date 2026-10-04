@@ -11,6 +11,11 @@ from unittest import TestCase, skipUnless
 from unittest.mock import MagicMock, patch
 
 from movie.conversion import MediaConverter
+from movie.core.convert import (
+    ConversionService,
+    discover_video_files,
+    execute_folder_conversion,
+)
 from movie.core.media import MediaProbe
 from movie.core.models import (
     ConvertPlan,
@@ -68,6 +73,71 @@ def _video_frame_hashes(path: Path) -> list[str]:
 
 @skipUnless(FFMPEG and FFPROBE, "FFmpeg et ffprobe ne sont pas installés")
 class FfmpegIntegrationTests(TestCase):
+    def test_real_folder_conversion_detects_all_video_extensions_and_copies_files(
+        self,
+    ) -> None:
+        assert FFMPEG is not None
+        assert FFPROBE is not None
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "sources"
+            nested = source / "camera"
+            nested.mkdir(parents=True)
+            note = source / "notes.txt"
+            note.write_text("à conserver", encoding="utf-8")
+            videos = (source / "film.avi", nested / "sequence.mkv")
+            for video in videos:
+                generated = subprocess.run(
+                    [
+                        FFMPEG,
+                        "-v",
+                        "error",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "testsrc=size=32x32:rate=10:duration=0.5",
+                        "-c:v",
+                        "mpeg4" if video.suffix == ".avi" else "ffv1",
+                        str(video),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(generated.returncode, 0, generated.stderr)
+
+            probe = MediaProbe(FFPROBE)
+            discovered = discover_video_files(source, probe)
+            destination = root / "sources-converted"
+            results = execute_folder_conversion(
+                source,
+                destination,
+                discovered,
+                output_format=OutputFormat.MP4,
+                output_quality=OutputQuality.COMPACT,
+                service=ConversionService(
+                    MagicMock(),
+                    probe,
+                    MediaConverter(FFMPEG),
+                ),
+            )
+
+            self.assertEqual(len(discovered), 2)
+            self.assertEqual(len(results), 2)
+            self.assertEqual(
+                (destination / "notes.txt").read_text(encoding="utf-8"),
+                "à conserver",
+            )
+            for converted in (
+                destination / "film.mp4",
+                destination / "camera" / "sequence.mp4",
+            ):
+                media = probe.probe(converted)
+                self.assertIn(
+                    ("video", "h264"),
+                    {(stream.kind, stream.codec) for stream in media.streams},
+                )
+
     def test_h264_mp4_smart_copy_preserves_every_video_frame(self) -> None:
         assert FFMPEG is not None
         assert FFPROBE is not None

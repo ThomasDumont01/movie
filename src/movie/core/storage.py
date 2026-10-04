@@ -35,6 +35,17 @@ def conversion_required_bytes(
     return source_size * copies + PUBLICATION_MARGIN_BYTES
 
 
+def folder_conversion_required_bytes(source: Path) -> int:
+    """Estime la place de la copie complète et d'une conversion temporaire."""
+
+    sizes = [
+        path.stat().st_size
+        for path in source.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    ]
+    return sum(sizes) + (max(sizes, default=0)) + PUBLICATION_MARGIN_BYTES
+
+
 def tag_required_bytes(source: Path) -> int:
     return source.stat().st_size + TAG_MARGIN_BYTES
 

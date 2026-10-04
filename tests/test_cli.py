@@ -399,6 +399,57 @@ class CommandFlowTests(TestCase):
             plan = service.execute.call_args.args[0]
             self.assertIs(plan.source_media, source_media)
 
+    @patch("movie.__main__.execute_folder_conversion")
+    @patch("movie.__main__.discover_video_files")
+    @patch("movie.__main__.load_config")
+    @patch("movie.__main__._conversion_service")
+    def test_convert_command_accepts_a_whole_directory(
+        self,
+        service_factory: MagicMock,
+        load: MagicMock,
+        discover: MagicMock,
+        execute: MagicMock,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "vacances"
+            source.mkdir()
+            video = source / "camera.data"
+            video.write_bytes(b"video")
+            discovered = ProbedMedia(
+                video,
+                10,
+                ("video",),
+                0,
+                streams=(MediaStream("video", codec="h264"),),
+            )
+            discover.return_value = (discovered,)
+            execute.return_value = ()
+            load.return_value = MovieConfig(
+                output_directory=root,
+                auto_run=True,
+                alert_sound=False,
+                convert_format=OutputFormat.MP4,
+                convert_quality=OutputQuality.BALANCED,
+                progress_delay_seconds=60,
+            )
+            output = StringIO()
+
+            with (
+                patch("builtins.input", side_effect=[str(source), "mp4"]),
+                redirect_stdout(output),
+            ):
+                result = main(["convert"])
+
+            self.assertEqual(result, 0)
+            self.assertIn("Analyse du dossier", output.getvalue())
+            self.assertIn("Dossier copié, converti et vérifié", output.getvalue())
+            discover.assert_called_once_with(source.resolve(), service_factory.return_value.probe)
+            self.assertEqual(
+                execute.call_args.args[1],
+                root.resolve() / "vacances-converted",
+            )
+
     @patch("movie.__main__.load_config")
     @patch("movie.__main__._conversion_service")
     def test_audio_only_source_is_refused_before_video_output_recap(

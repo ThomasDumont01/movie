@@ -17,6 +17,9 @@ from movie.core.convert import (
     ConversionService,
     build_convert_plan,
     conversion_settings,
+    discover_video_files,
+    execute_folder_conversion,
+    folder_output_path,
 )
 from movie.core.makemkv import MakeMkvClient, find_makemkvcon
 from movie.core.media import MediaProbe
@@ -36,6 +39,7 @@ from movie.core.rip import (
 )
 from movie.core.storage import (
     conversion_required_bytes,
+    folder_conversion_required_bytes,
     output_directory_issue,
     rip_required_bytes,
 )
@@ -466,10 +470,12 @@ def _convert() -> int:
     _print_header("Conversion d'un média")
 
     _alert_user(config.alert_sound)
-    source = _prompt_path("Fichier source (ISO ou média lisible par FFmpeg)")
+    source = _prompt_path("Fichier ou dossier source")
     source = source.expanduser().resolve()
+    if source.is_dir():
+        return _convert_folder(source, config, service)
     if not source.is_file():
-        raise MovieError(f"Le fichier source est introuvable : {source}")
+        raise MovieError(f"La source est introuvable : {source}")
 
     _print_step(1, 3, "Analyse de la source")
     iso_title: DiscTitle | None = None
@@ -580,6 +586,71 @@ def _convert() -> int:
     print(f"  Pistes    : {_media_summary(result.media.stream_types)}")
     print(f"  Chapitres : {result.media.chapter_count}")
     for warning in result.warnings:
+        print(f"  ⚠ {warning}")
+    return 0
+
+
+def _convert_folder(
+    source: Path,
+    config: MovieConfig,
+    service: ConversionService,
+) -> int:
+    _print_step(1, 3, "Analyse du dossier")
+    print("Recherche des vidéos en cours…")
+    videos = discover_video_files(source, service.probe)
+    if not videos:
+        raise MovieError("Le dossier ne contient aucune vidéo reconnue par FFmpeg.")
+    print(f"Dossier reconnu : {source.name} · {len(videos)} vidéo(s)")
+
+    _print_step(2, 3, "Choix de la sortie")
+    selected_format, selected_quality = _resolve_conversion_settings(config)
+    output_directory = _resolve_output_directory(
+        configured=config.output_directory,
+        fallback=source.parent,
+        required_bytes=folder_conversion_required_bytes(source),
+        alert=config.alert_sound,
+    )
+    destination = folder_output_path(source, output_directory)
+
+    _print_subheading("Récapitulatif")
+    print(f"  Source      : {source}")
+    print(f"  Vidéos      : {len(videos)}")
+    print(f"  Conversion  : {_output_description(selected_format, selected_quality)}")
+    print(f"  Destination : {destination}")
+    print("  Autres fichiers : copiés à l'identique")
+    if not config.auto_run and not _prompt_yes_no("Lancer cette conversion ?"):
+        print("Conversion annulée. Aucun dossier n'a été écrit.")
+        return 0
+
+    _print_step(3, 3, "Copie, conversion et vérification")
+    print("Traitement en cours…")
+    progress = _ProgressRenderer(
+        operation_label="Conversion du dossier",
+        threshold_seconds=config.progress_delay_seconds,
+    )
+    progress.start("Préparation de la copie")
+    try:
+        results = execute_folder_conversion(
+            source,
+            destination,
+            videos,
+            output_format=selected_format,
+            output_quality=selected_quality,
+            service=service,
+            on_progress=progress,
+        )
+    except BaseException:
+        progress.cancel()
+        raise
+    progress.finish()
+
+    warnings = tuple(
+        dict.fromkeys(warning for result in results for warning in result.warnings)
+    )
+    print("\n✓ Dossier copié, converti et vérifié")
+    print(f"  Dossier : {destination}")
+    print(f"  Vidéos  : {len(results)}")
+    for warning in warnings:
         print(f"  ⚠ {warning}")
     return 0
 
